@@ -18,6 +18,7 @@ class Organization:
     id: str
     name: str
     role: str
+    status: str = "ACTIVE"
 
     @property
     def display_role(self) -> str:
@@ -90,7 +91,7 @@ class TeamsV2Api:
             try:
                 response = requests.get(
                     f"{self.config.supabase_url}/rest/v1/organization_members",
-                    params={"select": "organization_id,role,status,organizations(name)", "status": "eq.ACTIVE", "user_id": f"eq.{self.session.user_id}"},
+                    params={"select": "organization_id,role,status,organizations(name)", "status": "in.(ACTIVE,PENDING)", "user_id": f"eq.{self.session.user_id}"},
                     headers=self.headers,
                     timeout=20,
                 )
@@ -120,7 +121,7 @@ class TeamsV2Api:
         priority = {"OWNER": 0, "ADMIN": 1, "PM": 2, "MEMBER": 3, "VIEWER": 4, "GUEST": 5}
         result: dict[str, Organization] = {}
         for row in response.json():
-            organization = Organization(row["organization_id"], (row.get("organizations") or {}).get("name", "회사"), row["role"])
+            organization = Organization(row["organization_id"], (row.get("organizations") or {}).get("name", "회사"), row["role"], row.get("status", "ACTIVE"))
             existing = result.get(organization.id)
             if existing is None or priority.get(organization.role, 99) < priority.get(existing.role, 99):
                 result[organization.id] = organization
@@ -184,6 +185,13 @@ class TeamsV2Api:
 
     def save_member_permission_overrides(self, organization_id: str, user_id: str, overrides: list[dict[str, str]]) -> None:
         self.rpc("teams_v2_save_member_permission_overrides", {"target_organization_id": organization_id, "target_user_id": user_id, "requested_overrides": overrides}, "직원 메뉴 권한을 바꿀 수 없습니다.")
+
+    def pending_employee_requests(self, organization_id: str) -> list[dict[str, Any]]:
+        payload = self.rpc("teams_v2_pending_employee_requests", {"target_organization_id": organization_id}, "가입 요청을 불러올 수 없습니다.")
+        return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+
+    def review_employee_request(self, request_id: str, decision: str, role: str = "MEMBER") -> None:
+        self.rpc("teams_v2_review_employee_join_request", {"target_request_id": request_id, "p_decision": decision, "p_role": role}, "가입 요청을 처리할 수 없습니다.")
 
     def rpc(self, name: str, payload: dict[str, Any], error_message: str) -> Any:
         response = requests.post(

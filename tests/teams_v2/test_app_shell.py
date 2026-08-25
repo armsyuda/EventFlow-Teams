@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication, QPushButton, QTableWidgetItem
 
 from eventflow_teams_v2.api import Organization
 from eventflow_teams_v2 import app as teams_app
-from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, TeamsV2Window, _launch_options, _write_update_health_file
+from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, PendingApprovalPage, TeamsV2Window, _launch_options, _write_update_health_file
 from eventflow_teams_v2.config import TeamsV2Config
 from eventflow_teams_v2.session import Session
 from eventflow_teams_v2.workspace import WorkspaceDatabase, workspace_database_path
@@ -85,6 +85,17 @@ def test_company_picker_has_an_explicit_membership_refresh_button(tmp_path: Path
     window = TeamsV2Window(TeamsV2Config("https://example.supabase.co", "publishable", tmp_path))
     assert window.organizations.refresh_button.text() == "회사 목록 다시 확인"
     assert not window.organizations.refresh_button.isHidden()
+    window.deleteLater()
+
+
+def test_pending_company_opens_the_no_data_approval_screen(tmp_path: Path) -> None:
+    QApplication.instance() or QApplication([])
+    window = TeamsV2Window(TeamsV2Config("https://example.supabase.co", "publishable", tmp_path))
+    window.api.session = Session("access", "refresh", "user-a")
+    window._open_workspace(Organization("org-a", "테스트 회사", "MEMBER", "PENDING"))
+    assert window.stack.currentWidget() is window.pending_approval
+    assert window.pending_approval.company.text() == "테스트 회사"
+    assert window.pending_approval.refresh.text() == "권한 승인 다시 확인"
     window.deleteLater()
 
 

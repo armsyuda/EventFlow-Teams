@@ -148,7 +148,8 @@ class OrganizationPage(QWidget):
             if item.widget(): item.widget().deleteLater()
         self.company_buttons.clear()
         for index, organization in enumerate(self.organizations):
-            item = QPushButton(f"{organization.name}\n{organization.display_role}"); item.setObjectName("TeamsCompanyChoice"); item.setProperty("quiet", True); item.setCheckable(True); item.setVisible(index < 5)
+            status = "권한 승인 대기" if organization.status == "PENDING" else organization.display_role
+            item = QPushButton(f"{organization.name}\n{status}"); item.setObjectName("TeamsCompanyChoice"); item.setProperty("quiet", True); item.setCheckable(True); item.setVisible(index < 5)
             item.clicked.connect(lambda _checked=False, value=organization: self._select(value))
             self.company_buttons.append(item); self.company_layout.addWidget(item)
         hidden_count = max(0, len(self.organizations) - 5)
@@ -189,6 +190,22 @@ class OrganizationPage(QWidget):
         self.more_button.hide()
 
 
+class PendingApprovalPage(QWidget):
+    refresh_requested = Signal()
+
+    def __init__(self) -> None:
+        super().__init__(); self.setObjectName("TeamsPendingApprovalPage")
+        root = QVBoxLayout(self); root.setContentsMargins(36, 36, 36, 36); root.addStretch()
+        card = QFrame(); card.setObjectName("Card"); card.setMaximumWidth(520); box = QVBoxLayout(card); box.setContentsMargins(38, 36, 38, 36)
+        box.addWidget(QLabel("권한 승인 대기", objectName="PageTitle")); self.company = QLabel(); self.company.setObjectName("SectionTitle"); box.addWidget(self.company)
+        box.addWidget(QLabel("아직 권한이 없습니다. 회사 관리자의 승인을 기다리고 있습니다. 승인되면 아래 버튼으로 바로 확인할 수 있습니다.", objectName="PageDescription"))
+        self.refresh = QPushButton("권한 승인 다시 확인"); self.refresh.setProperty("primary", True); self.refresh.clicked.connect(self.refresh_requested); box.addWidget(self.refresh)
+        self.message = QLabel(""); box.addWidget(self.message); root.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter); root.addStretch()
+
+    def show_company(self, organization: Organization) -> None:
+        self.company.setText(organization.name)
+
+
 class ConflictDialog(QDialog):
     """Explicitly choose the server value or retry the user's local value."""
 
@@ -215,6 +232,7 @@ class CompanyManagementPage(QWidget):
     guests_requested = Signal()
     members_requested = Signal()
     company_code_requested = Signal()
+    approvals_requested = Signal()
 
     def __init__(self, organization: Organization) -> None:
         super().__init__(); self.setObjectName("TeamsCompanyManagementPage")
@@ -222,6 +240,9 @@ class CompanyManagementPage(QWidget):
         root.addWidget(QLabel("회사 관리", objectName="PageTitle"))
         root.addWidget(QLabel(f"{organization.name}의 직원 권한과 프로젝트 게스트를 관리합니다. 플랫폼 관리 기능은 웹앱에서만 제공합니다.", objectName="PageDescription"))
         if organization.role in {"OWNER", "ADMIN"}:
+            approvals = QFrame(); approvals.setObjectName("Card"); approvals_layout = QVBoxLayout(approvals)
+            approvals_row = QHBoxLayout(); approvals_copy = QVBoxLayout(); approvals_copy.addWidget(QLabel("직원 가입 승인", objectName="SectionTitle")); approvals_copy.addWidget(QLabel("회사 코드로 가입한 직원을 승인하고 기본 역할을 부여합니다.")); approvals_row.addLayout(approvals_copy, 1)
+            approvals_button = QPushButton("가입 요청 확인"); approvals_button.setProperty("primary", True); approvals_button.setFixedWidth(156); approvals_button.clicked.connect(self.approvals_requested); approvals_row.addWidget(approvals_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); approvals_layout.addLayout(approvals_row); root.addWidget(approvals)
             code = QFrame(); code.setObjectName("Card"); code_layout = QVBoxLayout(code)
             code_row = QHBoxLayout(); code_copy = QVBoxLayout(); code_copy.addWidget(QLabel("직원 가입 코드", objectName="SectionTitle")); code_copy.addWidget(QLabel("일반 직원 가입에만 쓰는 고정 5자리 코드입니다. 게스트는 프로젝트 초대 링크를 사용합니다.")); code_row.addLayout(code_copy, 1)
             self.company_code_button = QPushButton("회사 코드 복사"); self.company_code_button.setProperty("primary", True); self.company_code_button.setFixedWidth(156); self.company_code_button.clicked.connect(self.company_code_requested); code_row.addWidget(self.company_code_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); code_layout.addLayout(code_row)
@@ -478,25 +499,25 @@ class GuestInvitationDialog(QDialog):
 class TeamsV2Window(QMainWindow):
     def __init__(self, config: TeamsV2Config) -> None:
         super().__init__(); self.config = config; self.store = SessionStore(); self.api = TeamsV2Api(config); self.workspace_db: WorkspaceDatabase | None = None
-        self.local_window: MainWindow | None = None; self.current_organization: Organization | None = None; self.permission_worker: Worker | None = None; self.snapshot_worker: Worker | None = None; self.changes_worker: Worker | None = None; self.sync_engine: WorkspaceSyncEngine | None = None; self.realtime: RealtimeSignalClient | None = None; self._sync_workers: list[Worker] = []; self._opened_cursor = ""; self._opened_with_pending = False
+        self.local_window: MainWindow | None = None; self.current_organization: Organization | None = None; self.permission_worker: Worker | None = None; self.snapshot_worker: Worker | None = None; self.changes_worker: Worker | None = None; self.sync_engine: WorkspaceSyncEngine | None = None; self.realtime: RealtimeSignalClient | None = None; self.access_realtime: RealtimeSignalClient | None = None; self._sync_workers: list[Worker] = []; self._opened_cursor = ""; self._opened_with_pending = False; self._force_snapshot = False
         self.update_info: UpdateInfo | None = None; self.update_progress: StartupSplash | None = None; self.update_check_worker: Worker | None = None; self.update_download_worker: Worker | None = None; self.company_code_worker: Worker | None = None
         self.company_management_page: CompanyManagementPage | None = None; self.company_members_page: CompanyMembersPage | None = None; self.guest_management_page: GuestManagementPage | None = None
         self.setWindowTitle("이벤트 플로우 Teams V2"); self.setWindowIcon(app_icon()); self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint); self.resize(1440, 900); self.setMinimumSize(1120, 700)
         outer = QWidget(); outer.setObjectName("AppRoot"); outer_layout = QVBoxLayout(outer); outer_layout.setContentsMargins(1, 1, 1, 1); outer_layout.setSpacing(0)
         self.shell_title_bar = ShellTitleBar(self); outer_layout.addWidget(self.shell_title_bar)
         self.stack = QStackedWidget(); outer_layout.addWidget(self.stack, 1); self.setCentralWidget(outer)
-        self.login = LoginPage(self.api); self.organizations = OrganizationPage(self.api)
-        self.stack.addWidget(self.login); self.stack.addWidget(self.organizations)
-        self.login.signed_in.connect(self._signed_in); self.organizations.selected.connect(self._open_workspace); self.organizations.logout_requested.connect(self.logout); self.organizations.organizations_loaded.connect(self._persist_recovered_session)
+        self.login = LoginPage(self.api); self.organizations = OrganizationPage(self.api); self.pending_approval = PendingApprovalPage()
+        self.stack.addWidget(self.login); self.stack.addWidget(self.organizations); self.stack.addWidget(self.pending_approval)
+        self.login.signed_in.connect(self._signed_in); self.organizations.selected.connect(self._open_workspace); self.organizations.logout_requested.connect(self.logout); self.organizations.organizations_loaded.connect(self._persist_recovered_session); self.pending_approval.refresh_requested.connect(self._force_refresh)
         if is_packaged_app(): QTimer.singleShot(900, self._check_updates_on_launch)
         session = self.store.load()
         if session:
-            self.api.session = session; self.stack.setCurrentWidget(self.organizations); self.organizations.load()
+            self.api.session = session; self._start_access_realtime(); self.stack.setCurrentWidget(self.organizations); self.organizations.load()
 
     def _signed_in(self, session: object) -> None:
         if not isinstance(session, Session):
             return
-        self.store.save(session); self.stack.setCurrentWidget(self.organizations); self.organizations.load()
+        self.store.save(session); self._start_access_realtime(); self.stack.setCurrentWidget(self.organizations); self.organizations.load()
 
     def _persist_recovered_session(self) -> None:
         """Keep a rotated refresh token instead of retrying the expired one next launch."""
@@ -506,6 +527,8 @@ class TeamsV2Window(QMainWindow):
     def _open_workspace(self, organization: Organization) -> None:
         if not self.api.session:
             return
+        if organization.status == "PENDING":
+            self._close_workspace(); self.current_organization = organization; self.pending_approval.show_company(organization); self.stack.setCurrentWidget(self.pending_approval); return
         self._close_workspace()
         self.current_organization = organization
         # The Local shell always receives a V2-owned database.  Its content is
@@ -539,8 +562,9 @@ class TeamsV2Window(QMainWindow):
         title_layout = local.title_bar.layout()
         self.sync_dot = QLabel(); self.sync_dot.setObjectName("TeamsSyncDot"); self.sync_dot.setFixedSize(10, 10)
         self.sync_text = QLabel(); self.sync_text.setObjectName("TeamsSyncText")
+        self.sync_refresh = QPushButton("↻"); self.sync_refresh.setObjectName("TeamsSyncRefresh"); self.sync_refresh.setFixedSize(24, 24); self.sync_refresh.setToolTip("서버 변경사항 및 권한 다시 확인"); self.sync_refresh.clicked.connect(self._force_refresh)
         insert_at = max(0, title_layout.count() - 3)
-        for offset, widget in enumerate((self.sync_dot, self.sync_text)):
+        for offset, widget in enumerate((self.sync_dot, self.sync_text, self.sync_refresh)):
             title_layout.insertWidget(insert_at + offset, widget)
         self._replace_title_control(local.title_bar.minimum, self.showMinimized)
         self._replace_title_control(local.title_bar.maximum, self._toggle_maximized)
@@ -573,6 +597,7 @@ class TeamsV2Window(QMainWindow):
         self.company_management_page.guests_requested.connect(self._show_guest_management_page)
         self.company_management_page.members_requested.connect(self._show_company_members_page)
         self.company_management_page.company_code_requested.connect(self._copy_company_join_code)
+        self.company_management_page.approvals_requested.connect(self._review_pending_employee_requests)
         local.stack.addWidget(self.company_management_page)
         self.company_members_page = CompanyMembersPage(self.api, organization)
         self.company_members_page.back_requested.connect(lambda: local.stack.setCurrentWidget(self.company_management_page))
@@ -628,6 +653,34 @@ class TeamsV2Window(QMainWindow):
         self.local_window.stack.setCurrentWidget(self.company_members_page)
         self.company_members_page.load()
 
+    def _review_pending_employee_requests(self) -> None:
+        if not self.current_organization:
+            return
+        try:
+            requests = self.api.pending_employee_requests(self.current_organization.id)
+        except ApiError as exc:
+            self._show_toast(str(exc)); return
+        if not requests:
+            self._show_toast("승인 대기 중인 직원 가입 요청이 없습니다."); return
+        labels = [f"{item.get('display_name') or item.get('email')} · {item.get('email')}" for item in requests]
+        selected, ok = QInputDialog.getItem(self, "직원 가입 승인", "가입 요청", labels, 0, False)
+        if not ok: return
+        request = requests[labels.index(selected)]
+        decision = QMessageBox.question(self, "직원 가입 요청", "예: 승인\n아니요: 반려", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Yes)
+        if decision == QMessageBox.StandardButton.Cancel: return
+        if decision == QMessageBox.StandardButton.No:
+            try: self.api.review_employee_request(str(request["id"]), "REJECTED")
+            except ApiError as exc: self._show_toast(str(exc)); return
+            self._show_toast("직원 가입 요청을 반려했습니다."); return
+        role_label, ok = QInputDialog.getItem(self, "역할 선택", "승인할 역할", ["일반 직원", "조회 전용", "프로젝트 매니저", "회사 관리자"], 0, False)
+        if not ok: return
+        role = {"일반 직원":"MEMBER", "조회 전용":"VIEWER", "프로젝트 매니저":"PM", "회사 관리자":"ADMIN"}[role_label]
+        try:
+            self.api.review_employee_request(str(request["id"]), "APPROVED", role)
+        except ApiError as exc:
+            self._show_toast(str(exc)); return
+        self._show_toast("직원 가입을 승인했습니다.")
+
     @staticmethod
     def _replace_title_control(button: QPushButton, callback: Callable[[], None]) -> None:
         try:
@@ -645,7 +698,7 @@ class TeamsV2Window(QMainWindow):
         permissions = set(value) if isinstance(value, set) else set()
         self.workspace_db.set_access_context(role=self.current_organization.role, permissions=permissions)
         cursor = self._opened_cursor
-        if cursor:
+        if cursor and not self._force_snapshot:
             # A synchronized Local workspace is immediately usable.  Never
             # overwrite its outbox with a complete snapshot on later starts.
             controller = TeamsPermissionController(self.local_window, permissions, self.current_organization.role)
@@ -670,6 +723,7 @@ class TeamsV2Window(QMainWindow):
         self.snapshot_worker.start()
 
     def _snapshot_loaded(self, organization_id: str, permissions: set[str], snapshot: object) -> None:
+        self._force_snapshot = False
         if not self.current_organization or self.current_organization.id != organization_id or not self.local_window or not self.workspace_db:
             return
         if not isinstance(snapshot, dict):
@@ -733,6 +787,43 @@ class TeamsV2Window(QMainWindow):
         color = colors.get(state, "#D99500")
         self.sync_dot.setStyleSheet(f"background:{color}; border-radius:5px;")
         self.sync_dot.setToolTip(detail or text); self.sync_text.setText(text); self.sync_text.setToolTip(detail or text)
+
+    def _start_access_realtime(self) -> None:
+        if self.access_realtime or not self.api.session:
+            return
+        self.access_realtime = RealtimeSignalClient(self.config.supabase_url, self.config.publishable_key, self.api.session.access_token, self.api.session.user_id, "teams_v2_access_signals", "user_id")
+        self.access_realtime.changed.connect(self._force_refresh)
+        self.access_realtime.start()
+
+    def _force_refresh(self) -> None:
+        if not self.api.session:
+            return
+        if self.local_window and self.workspace_db and self.workspace_db.pending_outbox():
+            self._show_toast("로컬 변경을 동기화한 뒤 서버 내용을 다시 확인해 주세요."); return
+        if getattr(self, "access_refresh_worker", None) and self.access_refresh_worker.isRunning():
+            return
+        if hasattr(self, "sync_refresh"): self.sync_refresh.setEnabled(False)
+        self._set_sync_state("CHECKING", "서버 변경사항 확인 중…") if hasattr(self, "sync_dot") else None
+        self.access_refresh_worker = Worker(self.api.organizations)
+        self.access_refresh_worker.finished.connect(self._force_refresh_loaded)
+        self.access_refresh_worker.failed.connect(self._force_refresh_failed)
+        self.access_refresh_worker.start()
+
+    def _force_refresh_loaded(self, value: object) -> None:
+        if hasattr(self, "sync_refresh"): self.sync_refresh.setEnabled(True)
+        organizations = value if isinstance(value, list) else []
+        self.organizations.organizations = organizations
+        target = next((item for item in organizations if self.current_organization and item.id == self.current_organization.id), None)
+        if target is None:
+            self._close_workspace(); self.current_organization = None; self.stack.setCurrentWidget(self.organizations); self.organizations._loaded(organizations); return
+        if target.status == "PENDING":
+            self._open_workspace(target); return
+        self._force_snapshot = True
+        self._open_workspace(target)
+
+    def _force_refresh_failed(self, message: str) -> None:
+        if hasattr(self, "sync_refresh"): self.sync_refresh.setEnabled(True)
+        self._set_sync_state("ERROR", "서버 변경사항 확인 실패", message)
 
     def _show_company_picker(self) -> None:
         # Close the embedded Local shell first, then defer page activation
@@ -967,6 +1058,8 @@ class TeamsV2Window(QMainWindow):
     def logout(self) -> None:
         session = self.api.session
         self._close_workspace()
+        if self.access_realtime:
+            self.access_realtime.stop(); self.access_realtime.wait(500); self.access_realtime.deleteLater(); self.access_realtime = None
         if session:
             try:
                 clear_user_workspaces(self.config.data_root, session.user_id)
