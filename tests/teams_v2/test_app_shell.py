@@ -80,6 +80,14 @@ def test_company_management_cards_keep_compact_actions_on_the_right() -> None:
     page.deleteLater()
 
 
+def test_company_picker_has_an_explicit_membership_refresh_button(tmp_path: Path) -> None:
+    QApplication.instance() or QApplication([])
+    window = TeamsV2Window(TeamsV2Config("https://example.supabase.co", "publishable", tmp_path))
+    assert window.organizations.refresh_button.text() == "회사 목록 다시 확인"
+    assert not window.organizations.refresh_button.isHidden()
+    window.deleteLater()
+
+
 def test_company_selection_opens_local_ui_against_v2_workspace(tmp_path: Path, monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = TeamsV2Config("https://example.supabase.co", "publishable", tmp_path)

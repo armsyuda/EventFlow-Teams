@@ -124,8 +124,9 @@ class OrganizationPage(QWidget):
         self.company_list = QWidget(); self.company_list.setObjectName("TeamsCompanyList"); self.company_layout = QVBoxLayout(self.company_list); self.company_layout.setContentsMargins(0, 0, 0, 0); self.company_layout.setSpacing(7)
         self.more_button = QPushButton(); self.more_button.setProperty("quiet", True); self.more_button.hide(); self.more_button.clicked.connect(self._show_more)
         self.button = QPushButton("선택한 회사로 시작"); self.button.setProperty("primary", True); self.button.setEnabled(False)
+        self.refresh_button = QPushButton("회사 목록 다시 확인"); self.refresh_button.setProperty("quiet", True); self.refresh_button.clicked.connect(self.load)
         self.retry_button = QPushButton("회사 목록 다시 시도"); self.retry_button.setProperty("quiet", True); self.retry_button.hide(); self.retry_button.clicked.connect(self._retry)
-        card = QFrame(); card.setObjectName("Card"); card.setMaximumWidth(520); layout = QVBoxLayout(card); layout.setContentsMargins(36, 34, 36, 34); layout.addWidget(QLabel("회사 선택", objectName="PageTitle")); layout.addWidget(QLabel("작업할 회사를 선택하면 저장된 작업본을 먼저 열고, 변경분은 뒤에서 조용히 동기화합니다.", objectName="PageDescription")); layout.addWidget(self.message); layout.addWidget(self.company_list); layout.addWidget(self.more_button); layout.addWidget(self.button)
+        card = QFrame(); card.setObjectName("Card"); card.setMaximumWidth(520); layout = QVBoxLayout(card); layout.setContentsMargins(36, 34, 36, 34); layout.addWidget(QLabel("회사 선택", objectName="PageTitle")); layout.addWidget(QLabel("작업할 회사를 선택하면 저장된 작업본을 먼저 열고, 변경분은 뒤에서 조용히 동기화합니다.", objectName="PageDescription")); layout.addWidget(self.message); layout.addWidget(self.company_list); layout.addWidget(self.more_button); layout.addWidget(self.button); layout.addWidget(self.refresh_button)
         layout.addWidget(self.retry_button)
         self.logout_button = QPushButton("로그아웃"); self.logout_button.setProperty("quiet", True); layout.addWidget(self.logout_button)
         root = QVBoxLayout(self); root.setContentsMargins(24, 24, 24, 24); root.addStretch(); root.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter); root.addStretch(); self.button.clicked.connect(self.choose)
@@ -134,12 +135,13 @@ class OrganizationPage(QWidget):
     def load(self) -> None:
         if getattr(self, "worker", None) and self.worker.isRunning():
             return
-        self.button.setEnabled(False); self.selected_organization = None; self.message.setText("접근 가능한 회사를 확인하는 중…")
+        self.button.setEnabled(False); self.refresh_button.setEnabled(False); self.selected_organization = None; self.message.setText("접근 가능한 회사를 확인하는 중…")
         self.retry_button.hide()
         self.worker = Worker(self.api.organizations); self.worker.finished.connect(self._loaded); self.worker.failed.connect(self._failed); self.worker.start()
 
     def _loaded(self, value: object) -> None:
         self._automatic_retries = 0
+        self.refresh_button.setEnabled(True)
         self.organizations = value if isinstance(value, list) else []
         while self.company_layout.count():
             item = self.company_layout.takeAt(0)
@@ -157,6 +159,7 @@ class OrganizationPage(QWidget):
         self.organizations_loaded.emit()
 
     def _failed(self, message: str) -> None:
+        self.refresh_button.setEnabled(True)
         message = message or "회사 목록을 불러오지 못했습니다."
         self.message.setText(message)
         self.retry_button.show()
