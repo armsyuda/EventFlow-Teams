@@ -1,0 +1,3 @@
+[console_scripts]
+event-flow = event_checklist.app:main
+eventflow-teams-v2 = eventflow_teams_v2.app:main

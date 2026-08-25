@@ -1,0 +1,10 @@
+PySide6<7,>=6.8
+openpyxl<4,>=3.1
+numpy<3,>=2
+requests<3,>=2.32
+keyring<26,>=25
+websocket-client<2,>=1.8
+
+[dev]
+pytest<9,>=8
+pyinstaller<7,>=6
