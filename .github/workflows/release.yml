@@ -12,8 +12,8 @@ jobs:
   build-and-release:
     runs-on: windows-latest
     env:
-      EVENTFLOW_SUPABASE_URL: ${{ vars.EVENTFLOW_SUPABASE_URL }}
-      EVENTFLOW_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EVENTFLOW_SUPABASE_PUBLISHABLE_KEY }}
+      PUBLIC_SUPABASE_URL: ${{ vars.EVENTFLOW_SUPABASE_URL }}
+      PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EVENTFLOW_SUPABASE_PUBLISHABLE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,8 +25,8 @@ jobs:
           python -m venv .venv
           .\.venv\Scripts\python -m pip install --upgrade pip
           .\.venv\Scripts\python -m pip install -e .[dev]
-          if (-not $env:EVENTFLOW_SUPABASE_URL -or -not $env:EVENTFLOW_SUPABASE_PUBLISHABLE_KEY) { throw 'Set EVENTFLOW_SUPABASE_URL and EVENTFLOW_SUPABASE_PUBLISHABLE_KEY repository variables before releasing.' }
-          @("EVENTFLOW_SUPABASE_URL=$env:EVENTFLOW_SUPABASE_URL", "EVENTFLOW_SUPABASE_PUBLISHABLE_KEY=$env:EVENTFLOW_SUPABASE_PUBLISHABLE_KEY") | Set-Content -Encoding utf8 .env
+          if (-not $env:PUBLIC_SUPABASE_URL -or -not $env:PUBLIC_SUPABASE_PUBLISHABLE_KEY) { throw 'Set EVENTFLOW_SUPABASE_URL and EVENTFLOW_SUPABASE_PUBLISHABLE_KEY repository variables before releasing.' }
+          @("PUBLIC_SUPABASE_URL=$env:PUBLIC_SUPABASE_URL", "PUBLIC_SUPABASE_PUBLISHABLE_KEY=$env:PUBLIC_SUPABASE_PUBLISHABLE_KEY") | Set-Content -Encoding utf8 .env
       - name: Test
         shell: pwsh
         run: .\.venv\Scripts\python -m pytest -q
