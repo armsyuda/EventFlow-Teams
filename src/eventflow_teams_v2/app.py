@@ -211,6 +211,7 @@ class CompanyManagementPage(QWidget):
 
     guests_requested = Signal()
     members_requested = Signal()
+    company_code_requested = Signal()
 
     def __init__(self, organization: Organization) -> None:
         super().__init__(); self.setObjectName("TeamsCompanyManagementPage")
@@ -218,6 +219,10 @@ class CompanyManagementPage(QWidget):
         root.addWidget(QLabel("회사 관리", objectName="PageTitle"))
         root.addWidget(QLabel(f"{organization.name}의 직원 권한과 프로젝트 게스트를 관리합니다. 플랫폼 관리 기능은 웹앱에서만 제공합니다.", objectName="PageDescription"))
         if organization.role in {"OWNER", "ADMIN"}:
+            code = QFrame(); code.setObjectName("Card"); code_layout = QVBoxLayout(code)
+            code_row = QHBoxLayout(); code_copy = QVBoxLayout(); code_copy.addWidget(QLabel("직원 가입 코드", objectName="SectionTitle")); code_copy.addWidget(QLabel("일반 직원 가입에만 쓰는 고정 5자리 코드입니다. 게스트는 프로젝트 초대 링크를 사용합니다.")); code_row.addLayout(code_copy, 1)
+            self.company_code_button = QPushButton("회사 코드 복사"); self.company_code_button.setProperty("primary", True); self.company_code_button.setFixedWidth(156); self.company_code_button.clicked.connect(self.company_code_requested); code_row.addWidget(self.company_code_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); code_layout.addLayout(code_row)
+            root.addWidget(code)
             members = QFrame(); members.setObjectName("Card"); member_layout = QVBoxLayout(members)
             member_row = QHBoxLayout(); member_copy = QVBoxLayout(); member_copy.addWidget(QLabel("직원 및 권한", objectName="SectionTitle")); member_copy.addWidget(QLabel("직원 역할, 활성 상태, 화면별 조회·편집 권한을 관리합니다.")); member_row.addLayout(member_copy, 1)
             member_button = QPushButton("직원·권한 관리"); member_button.setProperty("primary", True); member_button.setFixedWidth(156); member_button.clicked.connect(self.members_requested); member_row.addWidget(member_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); member_layout.addLayout(member_row)
@@ -226,6 +231,11 @@ class CompanyManagementPage(QWidget):
         guest_row = QHBoxLayout(); guest_copy = QVBoxLayout(); guest_copy.addWidget(QLabel("프로젝트 게스트 초대", objectName="SectionTitle")); guest_copy.addWidget(QLabel("게스트는 초대된 프로젝트의 체크리스트·달력만 조회합니다. 초대 링크는 한 번만 사용되며 7일 후 만료됩니다.")); guest_row.addLayout(guest_copy, 1)
         guest_button = QPushButton("게스트 초대 관리"); guest_button.setProperty("primary", True); guest_button.setFixedWidth(156); guest_button.clicked.connect(self.guests_requested); guest_row.addWidget(guest_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); guest_layout.addLayout(guest_row)
         root.addWidget(guests); root.addStretch()
+
+    def set_company_code_loading(self, loading: bool) -> None:
+        if hasattr(self, "company_code_button"):
+            self.company_code_button.setEnabled(not loading)
+            self.company_code_button.setText("회사 코드 확인 중…" if loading else "회사 코드 복사")
 
 
 class CompanyMembersPage(QWidget):
@@ -466,7 +476,7 @@ class TeamsV2Window(QMainWindow):
     def __init__(self, config: TeamsV2Config) -> None:
         super().__init__(); self.config = config; self.store = SessionStore(); self.api = TeamsV2Api(config); self.workspace_db: WorkspaceDatabase | None = None
         self.local_window: MainWindow | None = None; self.current_organization: Organization | None = None; self.permission_worker: Worker | None = None; self.snapshot_worker: Worker | None = None; self.changes_worker: Worker | None = None; self.sync_engine: WorkspaceSyncEngine | None = None; self.realtime: RealtimeSignalClient | None = None; self._sync_workers: list[Worker] = []; self._opened_cursor = ""; self._opened_with_pending = False
-        self.update_info: UpdateInfo | None = None; self.update_progress: StartupSplash | None = None; self.update_check_worker: Worker | None = None; self.update_download_worker: Worker | None = None
+        self.update_info: UpdateInfo | None = None; self.update_progress: StartupSplash | None = None; self.update_check_worker: Worker | None = None; self.update_download_worker: Worker | None = None; self.company_code_worker: Worker | None = None
         self.company_management_page: CompanyManagementPage | None = None; self.company_members_page: CompanyMembersPage | None = None; self.guest_management_page: GuestManagementPage | None = None
         self.setWindowTitle("이벤트 플로우 Teams V2"); self.setWindowIcon(app_icon()); self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint); self.resize(1440, 900); self.setMinimumSize(1120, 700)
         outer = QWidget(); outer.setObjectName("AppRoot"); outer_layout = QVBoxLayout(outer); outer_layout.setContentsMargins(1, 1, 1, 1); outer_layout.setSpacing(0)
@@ -559,6 +569,7 @@ class TeamsV2Window(QMainWindow):
         self.company_management_page = CompanyManagementPage(organization)
         self.company_management_page.guests_requested.connect(self._show_guest_management_page)
         self.company_management_page.members_requested.connect(self._show_company_members_page)
+        self.company_management_page.company_code_requested.connect(self._copy_company_join_code)
         local.stack.addWidget(self.company_management_page)
         self.company_members_page = CompanyMembersPage(self.api, organization)
         self.company_members_page.back_requested.connect(lambda: local.stack.setCurrentWidget(self.company_management_page))
@@ -576,6 +587,32 @@ class TeamsV2Window(QMainWindow):
             nav.setChecked(False)
         button.setChecked(True)
         self.local_window.stack.setCurrentWidget(self.company_management_page)
+
+    def _copy_company_join_code(self) -> None:
+        if not self.current_organization or not self.company_management_page:
+            return
+        if self.company_code_worker and self.company_code_worker.isRunning():
+            return
+        organization_id = self.current_organization.id
+        self.company_management_page.set_company_code_loading(True)
+        self.company_code_worker = Worker(lambda: self.api.company_join_code(organization_id))
+        self.company_code_worker.finished.connect(self._company_join_code_loaded)
+        self.company_code_worker.failed.connect(self._company_join_code_failed)
+        self.company_code_worker.start()
+
+    def _company_join_code_loaded(self, value: object) -> None:
+        if self.company_management_page:
+            self.company_management_page.set_company_code_loading(False)
+        if not isinstance(value, str) or len(value) != 5:
+            self._show_toast("회사 코드를 확인하지 못했습니다.")
+            return
+        QApplication.clipboard().setText(value)
+        self._show_toast(f"회사 코드 {value}를 클립보드에 복사했습니다.")
+
+    def _company_join_code_failed(self, _message: str) -> None:
+        if self.company_management_page:
+            self.company_management_page.set_company_code_loading(False)
+        self._show_toast("회사 코드를 불러오지 못했습니다. 관리자 권한을 확인해 주세요.")
 
     def _show_guest_management_page(self) -> None:
         if not self.local_window or not self.guest_management_page:

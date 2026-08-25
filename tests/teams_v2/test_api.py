@@ -48,6 +48,20 @@ def test_v2_permissions_use_the_platform_admin_free_rpc(tmp_path: Path, monkeypa
     assert calls == [("https://example.supabase.co/rest/v1/rpc/get_my_teams_v2_permissions", {"target_organization_id": "org"})]
 
 
+def test_v2_company_join_code_uses_admin_only_rpc(tmp_path: Path, monkeypatch) -> None:
+    calls = []
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs["json"]))
+        return _Response("E5X32")
+
+    monkeypatch.setattr("eventflow_teams_v2.api.requests.post", post)
+    api = TeamsV2Api(TeamsV2Config("https://example.supabase.co", "publishable", tmp_path), Session("token", "refresh", "user"))
+
+    assert api.company_join_code("org") == "E5X32"
+    assert calls == [("https://example.supabase.co/rest/v1/rpc/teams_v2_company_join_code", {"target_organization_id": "org"})]
+
+
 def test_v2_workspace_contract_uses_only_dedicated_rpcs(tmp_path: Path, monkeypatch) -> None:
     responses = iter([_Response({"cursor": 4}), _Response({"cursor": 5, "changes": []}), _Response({"results": []})])
     calls = []

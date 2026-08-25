@@ -169,6 +169,12 @@ class TeamsV2Api:
     def revoke_guest_invitation(self, invitation_id: str) -> None:
         self.rpc("teams_v2_revoke_guest_invitation", {"target_invitation_id": invitation_id}, "게스트 초대를 취소할 수 없습니다.")
 
+    def company_join_code(self, organization_id: str) -> str:
+        payload = self.rpc("teams_v2_company_join_code", {"target_organization_id": organization_id}, "회사 코드를 불러올 수 없습니다.")
+        if not isinstance(payload, str) or len(payload) != 5:
+            raise ApiError("회사 코드 응답이 올바르지 않습니다.")
+        return payload
+
     def company_members(self, organization_id: str) -> list[dict[str, Any]]:
         payload = self.rpc("teams_v2_company_members", {"target_organization_id": organization_id}, "직원 목록을 불러올 수 없습니다.")
         return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []

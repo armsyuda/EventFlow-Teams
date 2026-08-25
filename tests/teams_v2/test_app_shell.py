@@ -74,6 +74,7 @@ def test_company_management_cards_keep_compact_actions_on_the_right() -> None:
     QApplication.instance() or QApplication([])
     page = CompanyManagementPage(Organization("org", "회사", "OWNER"))
     buttons = {button.text(): button for button in page.findChildren(QPushButton)}
+    assert buttons["회사 코드 복사"].width() == 156
     assert buttons["직원·권한 관리"].width() == 156
     assert buttons["게스트 초대 관리"].width() == 156
     page.deleteLater()
