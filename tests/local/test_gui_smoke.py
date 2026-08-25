@@ -534,7 +534,7 @@ def test_missing_release_zip_explains_why_update_cannot_start(tmp_path, monkeypa
     monkeypatch.setattr(QMessageBox, "warning", lambda _parent, title, message: shown.update(title=title, message=message))
     window.install_available_update()
     assert shown["title"] == "업데이트 파일 누락"
-    assert "EventFlow-Windows.zip" in shown["message"]
+    assert "EventFlowTeams-Windows.zip" in shown["message"]
     assert "Release 주소" in shown["message"]
     window.close(); db.close()
 

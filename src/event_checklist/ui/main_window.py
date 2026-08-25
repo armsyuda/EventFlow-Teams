@@ -338,7 +338,7 @@ class MainWindow(QMainWindow):
         if not info.asset_url:
             message = (
                 f"새 버전 {info.version}은 공개되어 있지만 자동 업데이트를 설치할 수 없습니다.\n\n"
-                "확인된 원인\nGitHub Release에 EventFlow-Windows.zip 파일이 없습니다.\n\n"
+                "확인된 원인\nGitHub Release에 EventFlowTeams-Windows.zip 파일이 없습니다.\n\n"
                 "확인 방법\n해당 Release에 Windows ZIP 파일을 첨부한 뒤 다시 확인하세요.\n\n"
                 f"Release 주소: {info.release_url}"
             )

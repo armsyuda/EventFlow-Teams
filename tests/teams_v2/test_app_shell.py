@@ -6,10 +6,32 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QPushButton, QTableWidgetItem
 
 from eventflow_teams_v2.api import Organization
-from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, TeamsV2Window
+from eventflow_teams_v2 import app as teams_app
+from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, TeamsV2Window, _launch_options, _write_update_health_file
 from eventflow_teams_v2.config import TeamsV2Config
 from eventflow_teams_v2.session import Session
 from eventflow_teams_v2.workspace import WorkspaceDatabase, workspace_database_path
+
+
+def test_update_restart_arguments_write_a_health_file(tmp_path: Path) -> None:
+    health = tmp_path / "health.ok"
+    options = _launch_options(["--update-health-file", str(health), "--restarting-after-update"])
+    assert options.restarting_after_update
+    _write_update_health_file(options.update_health_file)
+    assert health.read_text(encoding="ascii") == "ok"
+
+
+def test_packaged_teams_client_checks_for_updates_on_launch(tmp_path: Path, monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    called = Mock()
+    monkeypatch.setattr(teams_app, "is_packaged_app", lambda: True)
+    monkeypatch.setattr(TeamsV2Window, "_check_updates_on_launch", called)
+    window = TeamsV2Window(TeamsV2Config("https://example.supabase.co", "publishable", tmp_path))
+    for _ in range(20):
+        app.processEvents(); time.sleep(0.06)
+        if called.called: break
+    assert called.called
+    window.deleteLater()
 
 
 def test_company_lookup_failure_offers_retry_without_forcing_logout(tmp_path: Path) -> None:

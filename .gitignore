@@ -9,6 +9,7 @@ __pycache__/
 .visual-data*/
 .visual-*/
 .installer-validation-*/
+.update-health-validation-*/
 .packaged-smoke-data*/
 .packaged-*/
 .scale-*/
