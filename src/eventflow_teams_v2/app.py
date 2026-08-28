@@ -540,7 +540,7 @@ class TeamsV2Window(QMainWindow):
         opened = self.workspace_db.one("SELECT remote_cursor FROM teams_v2_workspace WHERE singleton=1")
         self._opened_cursor = str(opened["remote_cursor"] or "") if opened else ""
         self._opened_with_pending = bool(self.workspace_db.pending_outbox())
-        self.local_window = MainWindow(self.workspace_db, enable_update_check=False)
+        self.local_window = MainWindow(self.workspace_db, enable_update_check=True)
         self.local_window.setParent(self.stack)
         self.local_window.setWindowFlags(Qt.WindowType.Widget)
         self._configure_local_shell(self.local_window, organization)

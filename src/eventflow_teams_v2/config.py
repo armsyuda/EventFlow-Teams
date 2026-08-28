@@ -15,8 +15,14 @@ class TeamsV2Config:
     @classmethod
     def from_environment(cls) -> "TeamsV2Config":
         values: dict[str, str] = {}
-        config_path = Path(sys.executable).parent / "EventFlowTeamsV2.env"
-        if config_path.exists():
+        config_directory = Path(sys.executable).parent
+        # The review executable was named EventFlowTeamsV2, while the public
+        # installer uses EventFlowTeams.  Accept both names during the
+        # transition so installed users always receive their connection values.
+        for config_name in ("EventFlowTeamsV2.env", "EventFlowTeams.env"):
+            config_path = config_directory / config_name
+            if not config_path.exists():
+                continue
             for line in config_path.read_text(encoding="utf-8-sig").splitlines():
                 if "=" not in line or line.lstrip().startswith("#"):
                     continue
