@@ -3,14 +3,19 @@ from __future__ import annotations
 from ctypes import wintypes
 import os
 import sys
+from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget
 
+from event_checklist import __version__
+from event_checklist.install_service import is_packaged_app
 from event_checklist.theme import application_stylesheet
+from event_checklist.update_service import UpdateInfo, download_update, fetch_latest_release, launch_installer, version_tuple
 from event_checklist.ui.main_window import MainWindow
+from event_checklist.ui.startup_splash import StartupSplash
 from event_checklist.ui.title_bar import app_icon
 
 from .api import ApiError, Organization, TeamsV2Api
@@ -501,6 +506,7 @@ class TeamsV2Window(QMainWindow):
     def __init__(self, config: TeamsV2Config) -> None:
         super().__init__(); self.config = config; self.store = SessionStore(); self.api = TeamsV2Api(config); self.workspace_db: WorkspaceDatabase | None = None
         self.local_window: MainWindow | None = None; self.current_organization: Organization | None = None; self.permission_worker: Worker | None = None; self.snapshot_worker: Worker | None = None; self.changes_worker: Worker | None = None; self.sync_engine: WorkspaceSyncEngine | None = None; self.realtime: RealtimeSignalClient | None = None; self._sync_workers: list[Worker] = []; self._opened_cursor = ""; self._opened_with_pending = False
+        self.update_info: UpdateInfo | None = None; self.update_progress: StartupSplash | None = None; self.update_check_worker: Worker | None = None; self.update_download_worker: Worker | None = None
         self.company_management_page: CompanyManagementPage | None = None; self.company_members_page: CompanyMembersPage | None = None; self.guest_management_page: GuestManagementPage | None = None
         self.company_workspace: CompanyWorkspace | None = None; self.company_work_page: CompanyWorkPage | None = None; self.company_calendar_page: CompanyCalendarPage | None = None; self.company_finance_page: FinancePage | None = None; self.company_v3_buttons: list[QPushButton] = []; self.v3_worker: Worker | None = None; self.v3_mutation_inflight = False; self._v3_initial_open = False
         self.v3_outbox_timer = QTimer(self); self.v3_outbox_timer.setInterval(1200); self.v3_outbox_timer.timeout.connect(self._flush_v3_outbox); self.v3_outbox_timer.start()
@@ -511,6 +517,8 @@ class TeamsV2Window(QMainWindow):
         self.login = LoginPage(self.api); self.organizations = OrganizationPage(self.api)
         self.stack.addWidget(self.login); self.stack.addWidget(self.organizations)
         self.login.signed_in.connect(self._signed_in); self.organizations.selected.connect(self._open_workspace); self.organizations.logout_requested.connect(self.logout); self.organizations.organizations_loaded.connect(self._persist_recovered_session)
+        if is_packaged_app():
+            QTimer.singleShot(900, self._check_updates_on_launch)
         session = self.store.load()
         if session:
             self.api.session = session; self.stack.setCurrentWidget(self.organizations); self.organizations.load()
@@ -540,7 +548,7 @@ class TeamsV2Window(QMainWindow):
         opened = self.workspace_db.one("SELECT remote_cursor FROM teams_v2_workspace WHERE singleton=1")
         self._opened_cursor = str(opened["remote_cursor"] or "") if opened else ""
         self._opened_with_pending = bool(self.workspace_db.pending_outbox())
-        self.local_window = MainWindow(self.workspace_db, enable_update_check=True)
+        self.local_window = MainWindow(self.workspace_db, enable_update_check=False)
         self.local_window.setParent(self.stack)
         self.local_window.setWindowFlags(Qt.WindowType.Widget)
         self._configure_local_shell(self.local_window, organization)
@@ -1097,6 +1105,54 @@ class TeamsV2Window(QMainWindow):
 
     def _finish_show_company_picker(self) -> None:
         self.shell_title_bar.show(); self.stack.setCurrentWidget(self.organizations); self.organizations.load()
+
+    def _check_updates_on_launch(self) -> None:
+        """Apply a newer public release before login or company selection."""
+        if self.update_check_worker and self.update_check_worker.isRunning():
+            return
+        self.update_check_worker = Worker(fetch_latest_release)
+        self.update_check_worker.finished.connect(self._update_check_finished)
+        self.update_check_worker.failed.connect(lambda _message: None)
+        self.update_check_worker.start()
+
+    def _update_check_finished(self, value: object) -> None:
+        info = value if isinstance(value, UpdateInfo) else None
+        if not info or not info.asset_url or version_tuple(info.version) <= version_tuple(__version__):
+            return
+        self.update_info = info
+        self._download_and_apply_update()
+
+    def _download_and_apply_update(self) -> None:
+        if not self.update_info or self.update_download_worker:
+            return
+        self.setEnabled(False)
+        self.update_progress = StartupSplash()
+        self.update_progress.setWindowTitle("EventFlow Teams 업데이트")
+        self.update_progress.show()
+        self.update_progress.set_status(f"새 버전 {self.update_info.version}을 내려받고 있습니다…")
+        self.update_download_worker = Worker(lambda: download_update(self.update_info))
+        self.update_download_worker.finished.connect(self._update_downloaded)
+        self.update_download_worker.failed.connect(self._update_failed)
+        self.update_download_worker.start()
+
+    def _update_downloaded(self, archive: object) -> None:
+        if not isinstance(archive, Path) or not self.update_info:
+            self._update_failed("업데이트 파일을 확인하지 못했습니다.")
+            return
+        if self.update_progress:
+            self.update_progress.set_status("설치를 준비하고 있습니다. 잠시 후 자동으로 다시 시작합니다…")
+        try:
+            launch_installer(archive, self.update_info, os.getpid())
+        except Exception as exc:
+            self._update_failed(str(exc))
+            return
+        QTimer.singleShot(700, QApplication.quit)
+
+    def _update_failed(self, _message: str) -> None:
+        if self.update_progress:
+            self.update_progress.close(); self.update_progress = None
+        self.update_download_worker = None
+        self.setEnabled(True)
 
     def _close_workspace(self) -> None:
         if self.realtime:
