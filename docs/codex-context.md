@@ -35,3 +35,8 @@
 - 검토 EXE가 일반 사용자 환경에서 `QtCore`를 불러오지 못하던 원인은 PyInstaller가 개발 환경 PATH의 호환되지 않는 ICU DLL을 포함하거나 Windows ICU bridge 일부를 누락한 것이었다.
 - `build_windows.ps1`은 이제 PySide6 DLL 경로를 먼저 등록하는 runtime hook을 포함하고, 빌드 후 Windows System32의 `icu.dll`, `icuin.dll`, `icuuc.dll`을 앱의 private runtime에 명시적으로 복사한다. 다음 clean build를 위해 복사본의 읽기 전용 특성도 해제한다.
 - 검토 파일을 기존 경로의 `EventFlowTeamsV2.exe`로 교체했다. System32만 남긴 격리 PATH와 별도 LOCALAPPDATA로 9초 기동을 확인했으며, 세 ICU DLL hash가 Windows System32 원본과 일치한다. GitHub Release·자동 업데이트는 계속 보류 상태다.
+
+## 2026-08-28 v0.3.60 정식 배포
+
+- 사용자 승인 후 커밋 `270ced8`과 태그 `v0.3.60`을 공개했다. GitHub Actions Windows release 실행 `33146356966`이 테스트, Inno 설치 파일, 자동 업데이트 ZIP, SHA-256 목록 생성 및 GitHub Release 게시를 모두 성공했다.
+- 공개 Release에는 `EventFlowTeams-Setup.exe`, 버전 설치 파일, `EventFlowTeams-Windows.zip`, `SHA256SUMS.txt`가 있다. Teams 앱의 최신 Release 조회는 `0.3.60`과 자동 업데이트 ZIP을 정상 인식했다. 이미 설치된 앱은 다음 실행 시 새 버전을 알리고, 업데이트를 누르면 다운로드·검증·교체·재시작한다.
