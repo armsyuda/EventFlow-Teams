@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QPushButton, QTableWidgetItem
 
 from eventflow_teams_v2.api import Organization
+from eventflow_teams_v2.app import _update_health_file
 from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, OrganizationPage, TeamsV2Window
 from eventflow_teams_v2.staff_pages import EmployeeWorkPage
 from eventflow_teams_v2.config import TeamsV2Config
@@ -182,3 +183,10 @@ def test_cached_workspace_opens_without_replacing_unsent_local_changes(tmp_path:
     assert calls == {"snapshot": 1, "changes": 1}, window.sync_text.text()
     assert window.local_window is not None and window.local_window.isEnabled()
     window._close_workspace(); window.deleteLater()
+
+
+def test_update_health_file_argument_is_read_only_when_complete(tmp_path):
+    health = tmp_path / "health.ok"
+    assert _update_health_file(["--update-health-file", str(health)]) == health
+    assert _update_health_file(["--update-health-file"]) is None
+    assert _update_health_file([]) is None

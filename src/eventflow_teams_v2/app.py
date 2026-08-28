@@ -1445,13 +1445,27 @@ class TeamsV2Window(QMainWindow):
         return super().nativeEvent(event_type, message)
 
 
-def main() -> None:
+def _update_health_file(argv: list[str]) -> Path | None:
+    try:
+        position = argv.index("--update-health-file")
+        value = argv[position + 1].strip()
+    except (ValueError, IndexError):
+        return None
+    return Path(value) if value else None
+
+
+def main(argv: list[str] | None = None) -> None:
+    health_file = _update_health_file(list(sys.argv[1:] if argv is None else argv))
     app = QApplication(sys.argv)
     app.setApplicationName("이벤트 플로우 Teams V2")
     app.setStyleSheet(application_stylesheet())
+    ready_for_update = False
     try:
         window = TeamsV2Window(TeamsV2Config.from_environment())
+        ready_for_update = True
     except RuntimeError as exc:
         window = QMainWindow(); window.setCentralWidget(QLabel(str(exc))); window.resize(520, 180)
     window.show()
+    if ready_for_update and health_file is not None:
+        QTimer.singleShot(500, lambda: health_file.write_text("ok", encoding="ascii"))
     raise SystemExit(app.exec())

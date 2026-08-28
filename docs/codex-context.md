@@ -46,3 +46,9 @@
 - 일부 PC의 기존 `REQUESTS_CA_BUNDLE` 환경값이 삭제된 사용자 폴더를 가리켜 회사 목록 조회가 실패했다. PyInstaller runtime hook이 앱에 포함된 `certifi/cacert.pem`을 `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `SSL_CERT_FILE`에 명시적으로 설정하도록 수정했다.
 - 오래된 외부 인증서 경로를 넣은 패키지 실행 환경 시뮬레이션에서 앱 내부 인증서 파일로 교체되는 것을 확인했다. 38개 Teams 테스트와 compileall도 통과했다. 다음 공개 버전은 `0.3.61`이다.
 - `v0.3.61`은 공개 배포되었고, GitHub Actions 실행 `33146777901`이 설치 파일·자동 업데이트 ZIP·SHA-256 목록 게시까지 성공했다. 최신 Release 조회도 `0.3.60` 설치본에서 업데이트 대상으로 정상 인식한다.
+
+## 2026-08-28 자동 업데이트 복구 원인 및 수정
+
+- `0.3.60`과 `0.3.61`의 현장 업데이트 로그는 파일 교체와 새 EXE 실행까지 성공했으나, 새 Teams entry point가 `--update-health-file` 인수를 처리하지 않아 30초 뒤 복구 경로가 실행된 것을 기록했다.
+- Teams V2 entry point가 이제 인수를 읽고, 실제 Teams 창이 정상 생성된 뒤에만 health 파일에 `ok`를 기록한다. 설정 오류 창인 경우에는 기록하지 않아 정상적인 롤백 안전장치는 유지된다.
+- 패키지 EXE를 오래된 인증서 환경값과 격리 사용자 데이터 환경에서 `--update-health-file`로 실행해 health 파일 `ok` 생성을 확인했다. Teams 테스트 39건과 compileall을 통과했으며 다음 배포 버전은 `0.3.62`이다.
