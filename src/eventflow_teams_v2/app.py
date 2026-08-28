@@ -92,11 +92,35 @@ class LoginPage(QWidget):
         self.password = QLineEdit(); self.password.setPlaceholderText("비밀번호"); self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.message = QLabel("회사 계정으로 로그인하세요.")
         self.button = QPushButton("로그인"); self.button.setProperty("primary", True)
+        self.signup_button = QPushButton("직원 회원가입"); self.signup_button.setProperty("quiet", True)
         form = QFormLayout(); form.addRow("이메일", self.email); form.addRow("비밀번호", self.password)
         card = QFrame(); card.setObjectName("Card"); card.setMaximumWidth(460)
-        layout = QVBoxLayout(card); layout.setContentsMargins(36, 34, 36, 34); layout.addWidget(QLabel("EVENTFLOW TEAMS V2", objectName="PageTitle")); layout.addWidget(QLabel("Local 업무 화면과 회사 동기화를 함께 사용합니다.", objectName="PageDescription")); layout.addWidget(self.message); layout.addLayout(form); layout.addWidget(self.button)
+        layout = QVBoxLayout(card); layout.setContentsMargins(36, 34, 36, 34); layout.addWidget(QLabel("EVENTFLOW TEAMS V2", objectName="PageTitle")); layout.addWidget(QLabel("Local 업무 화면과 회사 동기화를 함께 사용합니다.", objectName="PageDescription")); layout.addWidget(self.message); layout.addLayout(form); layout.addWidget(self.button); layout.addWidget(self.signup_button)
         root = QVBoxLayout(self); root.setContentsMargins(24, 24, 24, 24); root.addStretch(); root.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter); root.addStretch()
-        self.button.clicked.connect(self.login); self.password.returnPressed.connect(self.button.click)
+        self.button.clicked.connect(self.login); self.password.returnPressed.connect(self.button.click); self.signup_button.clicked.connect(self.sign_up)
+
+    def sign_up(self) -> None:
+        dialog = QDialog(self); dialog.setWindowTitle("직원 회원가입"); dialog.setMinimumWidth(420)
+        form = QFormLayout(dialog)
+        name, phone, email = QLineEdit(), QLineEdit(), QLineEdit()
+        password, confirm, code = QLineEdit(), QLineEdit(), QLineEdit()
+        password.setEchoMode(QLineEdit.EchoMode.Password); confirm.setEchoMode(QLineEdit.EchoMode.Password)
+        code.setMaxLength(5); code.setPlaceholderText("회사 관리자에게 받은 5자리 코드")
+        form.addRow("이름", name); form.addRow("연락처", phone); form.addRow("이메일", email); form.addRow("비밀번호", password); form.addRow("비밀번호 확인", confirm); form.addRow("회사 코드", code)
+        submit = QPushButton("가입하고 시작하기"); submit.setProperty("primary", True); form.addRow(submit)
+        def submit_signup() -> None:
+            if not name.text().strip() or not email.text().strip() or not password.text() or not code.text().strip():
+                QMessageBox.warning(dialog, "입력 확인", "이름, 이메일, 비밀번호, 회사 코드를 입력하세요."); return
+            if len(password.text()) < 8 or password.text() != confirm.text():
+                QMessageBox.warning(dialog, "비밀번호 확인", "8자 이상의 동일한 비밀번호를 입력하세요."); return
+            submit.setEnabled(False)
+            worker = Worker(lambda: self.api.sign_up_employee(email.text().strip(), password.text(), name.text().strip(), phone.text().strip(), code.text().strip()))
+            dialog.worker = worker
+            worker.finished.connect(lambda session: (dialog.accept(), self.signed_in.emit(session)))
+            worker.failed.connect(lambda message: (submit.setEnabled(True), QMessageBox.warning(dialog, "회원가입 실패", message)))
+            worker.start()
+        submit.clicked.connect(submit_signup)
+        dialog.exec()
 
     def login(self) -> None:
         if not self.email.text().strip() or not self.password.text():

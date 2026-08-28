@@ -58,6 +58,30 @@ class TeamsV2Api:
         self.session = Session(payload["access_token"], payload["refresh_token"], user["id"], str(user.get("email") or email))
         return self.session
 
+    def sign_up_employee(self, email: str, password: str, display_name: str, phone: str, join_code: str) -> Session:
+        """Create an employee account and activate its company membership immediately."""
+        code = "".join(character for character in join_code.upper() if character.isalnum())
+        if len(code) != 5:
+            raise ApiError("회사 코드는 5자리로 입력하세요.")
+        response = requests.post(
+            f"{self.config.supabase_url}/auth/v1/signup",
+            headers={"apikey": self.config.publishable_key, "content-type": "application/json"},
+            json={"email": email, "password": password, "data": {"display_name": display_name}},
+            timeout=20,
+        )
+        if not response.ok:
+            raise ApiError("회원가입을 완료하지 못했습니다. 이메일과 비밀번호를 확인해 주세요.")
+        payload = response.json(); user = payload.get("user") or {}
+        if not payload.get("access_token") or not payload.get("refresh_token") or not user.get("id"):
+            raise ApiError("회원가입 후 바로 로그인할 수 없습니다. 이메일 확인 설정을 점검해 주세요.")
+        self.session = Session(payload["access_token"], payload["refresh_token"], user["id"], str(user.get("email") or email))
+        try:
+            self.rpc("submit_employee_join_request", {"p_join_code": code, "p_contact_phone": phone}, "회사 코드가 올바르지 않거나 가입할 수 없습니다.")
+        except Exception:
+            self.session = None
+            raise
+        return self.session
+
     def refresh_session(self) -> Session:
         if not self.session:
             raise ApiError("로그인이 필요합니다.")
