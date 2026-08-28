@@ -10,7 +10,7 @@ from .. import __version__
 
 
 def app_icon() -> QIcon:
-    path = files("event_checklist").joinpath("resources/assets/event_flow.ico")
+    path = files("event_checklist").joinpath("resources/assets/event_flow_teams.ico")
     return QIcon(str(path)) if path.is_file() else QIcon()
 
 
