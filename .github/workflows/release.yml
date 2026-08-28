@@ -37,6 +37,7 @@ jobs:
         shell: pwsh
         run: |
           .\build_installer.ps1
+          Copy-Item .\release\installer\EventFlowTeams-Setup-*.exe .\release\installer\EventFlowTeams-Setup.exe -Force
           Compress-Archive -Path .\release\EventFlowTeams\* -DestinationPath .\release\EventFlowTeams-Windows.zip -Force
           Get-FileHash .\release\installer\*.exe, .\release\EventFlowTeams-Windows.zip -Algorithm SHA256 | Format-Table -AutoSize | Out-String | Set-Content -Encoding utf8 .\release\SHA256SUMS.txt
       - name: Publish GitHub Release
