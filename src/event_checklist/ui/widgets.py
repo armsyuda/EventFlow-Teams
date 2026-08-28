@@ -529,26 +529,9 @@ class FastEditableTable(QTableWidget):
 
     def open_date_editor(self, row: int, column: int, value: str | None, commit) -> None:
         self.close_cell_editor()
-        popup = QFrame(self)
-        popup.setWindowFlags(Qt.WindowType.Popup)
-        popup.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        popup.setObjectName("DateChoicePopup")
-        popup.setStyleSheet(
-            "QFrame#DateChoicePopup{background:#FFFFFF;border:1px solid #C9CDD3;border-radius:8px;}"
-        )
-        layout = QVBoxLayout(popup); layout.setContentsMargins(8, 8, 8, 8); layout.setSpacing(6)
-        calendar = QCalendarWidget(popup)
-        calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
-        calendar.setGridVisible(True)
-        calendar.setSelectedDate(QDate.fromString(value, "yyyy-MM-dd") if value else QDate.currentDate())
-        calendar.setFixedSize(340, 270)
-        layout.addWidget(calendar)
-        actions = QHBoxLayout(); actions.setContentsMargins(0, 0, 0, 0); actions.setSpacing(6)
-        clear = QPushButton("날짜 비우기", popup)
-        clear.setToolTip("입력한 날짜를 지우고 미입력 상태로 되돌립니다.")
-        close = QPushButton("닫기", popup)
-        actions.addWidget(clear); actions.addStretch(); actions.addWidget(close)
-        layout.addLayout(actions)
+        popup = _DirectCalendarPopup(self)
+        popup.set_selected_date(QDate.fromString(value, "yyyy-MM-dd") if value else QDate.currentDate())
+        popup.set_clear_action("날짜 비우기")
         self._date_popup = popup
 
         def finish_popup():
@@ -567,11 +550,9 @@ class FastEditableTable(QTableWidget):
                 return
             finish_popup()
 
-        calendar.clicked.connect(apply_date)
-        clear.clicked.connect(clear_date)
-        close.clicked.connect(finish_popup)
+        popup.calendar.clicked.connect(apply_date)
+        popup.clear_button.clicked.connect(clear_date)
         popup.destroyed.connect(lambda *_args: setattr(self, "_date_popup", None) if self._date_popup is popup else None)
-        popup.adjustSize()
         rect = self.visualRect(self.model().index(row, column))
         position = self.viewport().mapToGlobal(QPoint(rect.left(), rect.bottom()))
         screen = QApplication.screenAt(position)
@@ -842,8 +823,85 @@ def configure_grouped_editor_table(table: QTableWidget, anchor_column: int = 1) 
     table.verticalHeader().setMinimumSectionSize(48)
 
 
+class _DirectCalendarPopup(QFrame):
+    """월 이동과 연도 선택을 명확히 분리한 날짜 선택 팝업."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Popup)
+        self.setObjectName("DirectCalendarPopup")
+        self.setStyleSheet(
+            "QFrame#DirectCalendarPopup{background:#FFFFFF;border:1px solid #CBD5E1;border-radius:10px;}"
+            "QPushButton#DirectCalendarMonthButton{background:#FFFFFF;color:#172B4D;border:1px solid #CBD5E1;"
+            "border-radius:6px;font-size:20px;font-weight:700;min-width:30px;max-width:30px;"
+            "min-height:30px;max-height:30px;padding:0;}"
+            "QPushButton#DirectCalendarMonthButton:hover{background:#EFF6FF;border-color:#60A5FA;}"
+            "QLabel#DirectCalendarMonthLabel{color:#172B4D;font-weight:700;font-size:15px;}"
+            "QComboBox#DirectCalendarYear{background:#FFFFFF;color:#172B4D;border:1px solid #CBD5E1;"
+            "border-radius:6px;padding:3px 20px;font-weight:700;min-width:76px;text-align:center;}"
+        )
+        self.root = QVBoxLayout(self); self.root.setContentsMargins(6, 6, 6, 6); self.root.setSpacing(4)
+        header = QHBoxLayout(); header.setContentsMargins(4, 0, 4, 0); header.setSpacing(6)
+        self.previous_button = QPushButton("‹", self); self.previous_button.setObjectName("DirectCalendarMonthButton")
+        self.previous_button.setToolTip("이전 달")
+        self.month_label = QLabel(self); self.month_label.setObjectName("DirectCalendarMonthLabel")
+        self.month_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.year_combo = QComboBox(self); self.year_combo.setObjectName("DirectCalendarYear")
+        self.year_combo.setEditable(True); self.year_combo.lineEdit().setReadOnly(True); self.year_combo.lineEdit().setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.year_combo.setToolTip("연도 선택")
+        self.next_button = QPushButton("›", self); self.next_button.setObjectName("DirectCalendarMonthButton")
+        self.next_button.setToolTip("다음 달")
+        header.addWidget(self.previous_button)
+        header.addStretch(1)
+        header.addWidget(self.month_label)
+        header.addWidget(self.year_combo)
+        header.addStretch(1)
+        header.addWidget(self.next_button)
+        self.root.addLayout(header)
+        self.calendar = QCalendarWidget(self)
+        self.calendar.setNavigationBarVisible(False)
+        self.calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        self.calendar.setGridVisible(True)
+        self.calendar.setFixedSize(326, 254)
+        self.root.addWidget(self.calendar, 0, Qt.AlignmentFlag.AlignCenter)
+        self.setFixedSize(340, 304)
+        self.previous_button.clicked.connect(self.calendar.showPreviousMonth)
+        self.next_button.clicked.connect(self.calendar.showNextMonth)
+        self.year_combo.currentIndexChanged.connect(self._select_year)
+        self.calendar.currentPageChanged.connect(self._sync_header)
+        self._sync_header(self.calendar.yearShown(), self.calendar.monthShown())
+
+    def set_clear_action(self, label: str) -> None:
+        if hasattr(self, "clear_button"):
+            return
+        actions = QHBoxLayout(); actions.setContentsMargins(2, 0, 2, 0)
+        self.clear_button = QPushButton(label, self); self.clear_button.setToolTip("입력한 날짜를 지우고 미입력 상태로 되돌립니다.")
+        close = QPushButton("닫기", self); close.clicked.connect(self.hide)
+        actions.addWidget(self.clear_button); actions.addStretch(); actions.addWidget(close)
+        self.root.addLayout(actions); self.setFixedSize(340, 344)
+
+    def set_selected_date(self, value: QDate) -> None:
+        self.calendar.setSelectedDate(value)
+        self.calendar.setCurrentPage(value.year(), value.month())
+
+    def _sync_header(self, year: int, month: int) -> None:
+        self.month_label.setText(f"{month}월")
+        self.year_combo.blockSignals(True)
+        # 일정은 앞으로의 계획이 주 대상이지만, 과거 기록도 선택할 수 있도록
+        # 화면의 기준 연도만 중앙에 두고 앞뒤 2년씩 정확히 다섯 개만 보여 준다.
+        self.year_combo.clear()
+        for candidate in range(year - 2, year + 3):
+            self.year_combo.addItem(str(candidate), candidate)
+        self.year_combo.setCurrentIndex(2)
+        self.year_combo.blockSignals(False)
+
+    def _select_year(self, index: int) -> None:
+        if index >= 0:
+            self.calendar.setCurrentPage(int(self.year_combo.itemData(index)), self.calendar.monthShown())
+
+
 class DirectDateEdit(QDateEdit):
-    """입력창 어디를 눌러도 즉시 달력을 여는 날짜 입력창."""
+    """직접 입력 없이 공용 달력을 여는 날짜 입력창."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -857,7 +915,14 @@ class DirectDateEdit(QDateEdit):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         # 표에는 날짜 입력칸이 수백 개 생길 수 있다. 달력은 실제 클릭할 때만
         # 하나씩 만들어 초기 체크리스트 표시 비용을 줄인다.
-        self._direct_calendar: QCalendarWidget | None = None
+        self._direct_calendar: _DirectCalendarPopup | None = None
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
+            self._open_calendar()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
@@ -867,7 +932,7 @@ class DirectDateEdit(QDateEdit):
         super().mousePressEvent(event)
 
     def eventFilter(self, watched, event):
-        if watched is self.lineEdit() and event.type() == QEvent.Type.MouseButtonPress:
+        if watched is self.lineEdit() and event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
             if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
                 self._open_calendar()
                 return True
@@ -881,10 +946,10 @@ class DirectDateEdit(QDateEdit):
         super().keyPressEvent(event)
 
     def _open_calendar(self):
-        calendar = self._ensure_calendar()
-        calendar.setSelectedDate(self.date())
-        calendar.move(self.mapToGlobal(self.rect().bottomLeft()))
-        calendar.show(); calendar.raise_(); calendar.activateWindow()
+        popup = self._ensure_calendar()
+        popup.set_selected_date(self.date())
+        popup.move(self.mapToGlobal(self.rect().bottomLeft()))
+        popup.show(); popup.raise_(); popup.activateWindow()
 
     def _choose_date(self, value: QDate):
         self.setDate(value)
@@ -892,17 +957,13 @@ class DirectDateEdit(QDateEdit):
             self._direct_calendar.hide()
 
     def calendarWidget(self):
-        return self._ensure_calendar()
+        return self._ensure_calendar().calendar
 
-    def _ensure_calendar(self) -> QCalendarWidget:
+    def _ensure_calendar(self) -> _DirectCalendarPopup:
         if self._direct_calendar is None:
-            calendar = QCalendarWidget(self)
-            calendar.setWindowFlags(Qt.WindowType.Popup)
-            calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
-            calendar.setGridVisible(True)
-            calendar.setFixedSize(340, 270)
-            calendar.clicked.connect(self._choose_date)
-            self._direct_calendar = calendar
+            popup = _DirectCalendarPopup(self)
+            popup.calendar.clicked.connect(self._choose_date)
+            self._direct_calendar = popup
         return self._direct_calendar
 
 

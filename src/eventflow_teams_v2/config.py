@@ -15,7 +15,7 @@ class TeamsV2Config:
     @classmethod
     def from_environment(cls) -> "TeamsV2Config":
         values: dict[str, str] = {}
-        config_path = Path(sys.executable).parent / "EventFlowTeams.env"
+        config_path = Path(sys.executable).parent / "EventFlowTeamsV2.env"
         if config_path.exists():
             for line in config_path.read_text(encoding="utf-8-sig").splitlines():
                 if "=" not in line or line.lstrip().startswith("#"):
@@ -27,4 +27,4 @@ class TeamsV2Config:
         if not url or not key or "YOUR_PROJECT" in url or "REPLACE_ME" in key:
             raise RuntimeError("EVENTFLOW_SUPABASE_URL과 EVENTFLOW_SUPABASE_PUBLISHABLE_KEY를 설정해 주세요.")
         local_app_data = Path(getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-        return cls(url, key, local_app_data / "EventFlowTeams")
+        return cls(url, key, local_app_data / "EventFlowTeamsV2")

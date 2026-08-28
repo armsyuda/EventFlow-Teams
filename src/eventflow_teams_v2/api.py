@@ -18,7 +18,6 @@ class Organization:
     id: str
     name: str
     role: str
-    status: str = "ACTIVE"
 
     @property
     def display_role(self) -> str:
@@ -115,7 +114,7 @@ class TeamsV2Api:
             try:
                 response = requests.get(
                     f"{self.config.supabase_url}/rest/v1/organization_members",
-                    params={"select": "organization_id,role,status,organizations(name)", "status": "in.(ACTIVE,PENDING)", "user_id": f"eq.{self.session.user_id}"},
+                    params={"select": "organization_id,role,status,organizations(name)", "status": "eq.ACTIVE", "user_id": f"eq.{self.session.user_id}"},
                     headers=self.headers,
                     timeout=20,
                 )
@@ -145,7 +144,7 @@ class TeamsV2Api:
         priority = {"OWNER": 0, "ADMIN": 1, "PM": 2, "MEMBER": 3, "VIEWER": 4, "GUEST": 5}
         result: dict[str, Organization] = {}
         for row in response.json():
-            organization = Organization(row["organization_id"], (row.get("organizations") or {}).get("name", "회사"), row["role"], row.get("status", "ACTIVE"))
+            organization = Organization(row["organization_id"], (row.get("organizations") or {}).get("name", "회사"), row["role"])
             existing = result.get(organization.id)
             if existing is None or priority.get(organization.role, 99) < priority.get(existing.role, 99):
                 result[organization.id] = organization
@@ -181,6 +180,24 @@ class TeamsV2Api:
             raise ApiError("변경 저장 응답이 올바르지 않습니다.")
         return payload
 
+    def workspace_v3_snapshot(self, organization_id: str) -> dict[str, Any]:
+        payload = self.rpc("teams_v3_workspace_snapshot", {"target_organization_id": organization_id}, "회사 전체 업무 작업본을 받을 수 없습니다.")
+        if not isinstance(payload, dict):
+            raise ApiError("회사 전체 업무 작업본 응답이 올바르지 않습니다.")
+        return payload
+
+    def workspace_v3_changes(self, organization_id: str, after_sequence: int) -> dict[str, Any]:
+        payload = self.rpc("teams_v3_workspace_changes", {"target_organization_id": organization_id, "after_sequence": max(0, int(after_sequence))}, "회사 전체 업무 변경분을 확인할 수 없습니다.")
+        if not isinstance(payload, dict):
+            raise ApiError("회사 전체 업무 변경분 응답이 올바르지 않습니다.")
+        return payload
+
+    def apply_v3_mutations(self, organization_id: str, mutations: list[dict[str, Any]]) -> dict[str, Any]:
+        payload = self.rpc("teams_v3_apply_mutations", {"target_organization_id": organization_id, "requested_mutations": mutations}, "회사 전체 업무 변경을 저장할 수 없습니다.")
+        if not isinstance(payload, dict):
+            raise ApiError("회사 전체 업무 저장 응답이 올바르지 않습니다.")
+        return payload
+
     def create_guest_invitation(self, event_id: str, allow_settlement: bool) -> dict[str, Any]:
         payload = self.rpc("teams_v2_create_guest_invitation", {"target_event_id": event_id, "allow_settlement": allow_settlement}, "게스트 초대를 만들 수 없습니다.")
         if not isinstance(payload, dict) or not payload.get("token"):
@@ -194,15 +211,17 @@ class TeamsV2Api:
     def revoke_guest_invitation(self, invitation_id: str) -> None:
         self.rpc("teams_v2_revoke_guest_invitation", {"target_invitation_id": invitation_id}, "게스트 초대를 취소할 수 없습니다.")
 
-    def company_join_code(self, organization_id: str) -> str:
-        payload = self.rpc("teams_v2_company_join_code", {"target_organization_id": organization_id}, "회사 코드를 불러올 수 없습니다.")
-        if not isinstance(payload, str) or len(payload) != 5:
-            raise ApiError("회사 코드 응답이 올바르지 않습니다.")
-        return payload
-
     def company_members(self, organization_id: str) -> list[dict[str, Any]]:
         payload = self.rpc("teams_v2_company_members", {"target_organization_id": organization_id}, "직원 목록을 불러올 수 없습니다.")
         return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+
+    def company_join_code(self, organization_id: str) -> str:
+        """Return the fixed employee join code through the administrator RPC."""
+        payload = self.rpc("teams_v2_company_join_code", {"target_organization_id": organization_id}, "회사 코드를 불러올 수 없습니다.")
+        code = str(payload or "").strip().upper()
+        if len(code) != 5:
+            raise ApiError("회사 코드 응답이 올바르지 않습니다.")
+        return code
 
     def update_company_member(self, organization_id: str, user_id: str, role: str | None = None, status: str | None = None) -> None:
         self.rpc("teams_v2_update_company_member", {"target_organization_id": organization_id, "target_user_id": user_id, "target_role": role, "target_status": status}, "직원 정보를 바꿀 수 없습니다.")
@@ -210,12 +229,45 @@ class TeamsV2Api:
     def save_member_permission_overrides(self, organization_id: str, user_id: str, overrides: list[dict[str, str]]) -> None:
         self.rpc("teams_v2_save_member_permission_overrides", {"target_organization_id": organization_id, "target_user_id": user_id, "requested_overrides": overrides}, "직원 메뉴 권한을 바꿀 수 없습니다.")
 
-    def pending_employee_requests(self, organization_id: str) -> list[dict[str, Any]]:
-        payload = self.rpc("teams_v2_pending_employee_requests", {"target_organization_id": organization_id}, "가입 요청을 불러올 수 없습니다.")
+    def staff_directory(self, organization_id: str) -> list[dict[str, Any]]:
+        payload = self.rpc("teams_v2_staff_directory", {"target_organization_id": organization_id}, "직원 정보를 불러올 수 없습니다.")
         return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
 
-    def review_employee_request(self, request_id: str, decision: str, role: str = "MEMBER") -> None:
-        self.rpc("teams_v2_review_employee_join_request", {"target_request_id": request_id, "p_decision": decision, "p_role": role}, "가입 요청을 처리할 수 없습니다.")
+    def personal_schedules(self, organization_id: str) -> list[dict[str, Any]]:
+        payload = self.rpc("teams_v2_personal_schedules", {"target_organization_id": organization_id}, "개인 일정을 불러올 수 없습니다.")
+        return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+
+    def my_task_priorities(self, organization_id: str) -> list[dict[str, Any]]:
+        payload = self.rpc("teams_v2_my_task_priorities", {"target_organization_id": organization_id}, "내 업무 우선순위를 불러올 수 없습니다.")
+        return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+
+    def reorder_my_personal_schedules(self, organization_id: str, schedule_ids: list[str]) -> None:
+        self.rpc("teams_v2_reorder_my_personal_schedules", {"target_organization_id": organization_id, "ordered_schedule_ids": schedule_ids}, "개인 일정 순서를 저장할 수 없습니다.")
+
+    def reorder_my_tasks(self, organization_id: str, task_ids: list[str]) -> None:
+        self.rpc("teams_v2_reorder_my_tasks", {"target_organization_id": organization_id, "ordered_task_ids": task_ids}, "내 업무 우선순위를 저장할 수 없습니다.")
+
+    def save_member_profile(self, organization_id: str, user_id: str, color_hex: str | None = None, job_title: str | None = None) -> None:
+        self.rpc("teams_v2_save_member_profile", {"target_organization_id": organization_id, "target_user_id": user_id, "target_color_hex": color_hex, "target_job_title": job_title}, "직원 정보를 저장할 수 없습니다.")
+
+    def save_personal_schedule(self, organization_id: str, schedule_id: str | None, start_date: str, end_date: str, title: str, content: str) -> dict[str, Any]:
+        payload = self.rpc("teams_v2_save_personal_schedule", {"target_organization_id": organization_id, "schedule_id": schedule_id, "start_on": start_date, "end_on": end_date, "schedule_title": title, "schedule_content": content}, "개인 일정을 저장할 수 없습니다.")
+        return payload if isinstance(payload, dict) else {}
+
+    def delete_personal_schedule(self, organization_id: str, schedule_id: str) -> None:
+        self.rpc("teams_v2_delete_personal_schedule", {"target_organization_id": organization_id, "schedule_id": schedule_id}, "개인 일정을 삭제할 수 없습니다.")
+
+    def assign_task_member(self, organization_id: str, task_id: str, member_user_id: str | None, expected_row_version: int) -> dict[str, Any]:
+        payload = self.rpc("teams_v2_assign_task_member", {"target_organization_id": organization_id, "target_task_id": task_id, "target_member_user_id": member_user_id, "expected_row_version": expected_row_version}, "직원 담당자를 저장할 수 없습니다.")
+        return payload if isinstance(payload, dict) else {}
+
+    def transfer_task_member(self, organization_id: str, task_id: str, member_user_id: str, expected_row_version: int) -> dict[str, Any]:
+        payload = self.rpc("teams_v2_transfer_task_member", {"target_organization_id": organization_id, "target_task_id": task_id, "target_member_user_id": member_user_id, "expected_row_version": expected_row_version}, "업무를 이관할 수 없습니다.")
+        return payload if isinstance(payload, dict) else {}
+
+    def pop_task_transfer_notifications(self, organization_id: str) -> list[dict[str, Any]]:
+        payload = self.rpc("teams_v2_pop_task_transfer_notifications", {"target_organization_id": organization_id}, "업무 이관 알림을 받을 수 없습니다.")
+        return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
 
     def rpc(self, name: str, payload: dict[str, Any], error_message: str) -> Any:
         response = requests.post(
@@ -225,5 +277,7 @@ class TeamsV2Api:
             timeout=20,
         )
         if not response.ok:
+            if getattr(response, "status_code", None) == 404:
+                raise ApiError(f"{error_message}\n서버 업데이트가 아직 적용되지 않았습니다.")
             raise ApiError(error_message)
         return response.json()

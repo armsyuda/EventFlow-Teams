@@ -6,32 +6,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QPushButton, QTableWidgetItem
 
 from eventflow_teams_v2.api import Organization
-from eventflow_teams_v2 import app as teams_app
-from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, PendingApprovalPage, TeamsV2Window, _launch_options, _write_update_health_file
+from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, TeamsV2Window
 from eventflow_teams_v2.config import TeamsV2Config
 from eventflow_teams_v2.session import Session
 from eventflow_teams_v2.workspace import WorkspaceDatabase, workspace_database_path
-
-
-def test_update_restart_arguments_write_a_health_file(tmp_path: Path) -> None:
-    health = tmp_path / "health.ok"
-    options = _launch_options(["--update-health-file", str(health), "--restarting-after-update"])
-    assert options.restarting_after_update
-    _write_update_health_file(options.update_health_file)
-    assert health.read_text(encoding="ascii") == "ok"
-
-
-def test_packaged_teams_client_checks_for_updates_on_launch(tmp_path: Path, monkeypatch) -> None:
-    app = QApplication.instance() or QApplication([])
-    called = Mock()
-    monkeypatch.setattr(teams_app, "is_packaged_app", lambda: True)
-    monkeypatch.setattr(TeamsV2Window, "_check_updates_on_launch", called)
-    window = TeamsV2Window(TeamsV2Config("https://example.supabase.co", "publishable", tmp_path))
-    for _ in range(20):
-        app.processEvents(); time.sleep(0.06)
-        if called.called: break
-    assert called.called
-    window.deleteLater()
 
 
 def test_company_lookup_failure_offers_retry_without_forcing_logout(tmp_path: Path) -> None:
@@ -74,29 +52,22 @@ def test_company_management_cards_keep_compact_actions_on_the_right() -> None:
     QApplication.instance() or QApplication([])
     page = CompanyManagementPage(Organization("org", "회사", "OWNER"))
     buttons = {button.text(): button for button in page.findChildren(QPushButton)}
-    assert buttons["회사 코드 복사"].width() == 156
     assert buttons["직원·권한 관리"].width() == 156
     assert buttons["게스트 초대 관리"].width() == 156
     page.deleteLater()
 
 
-def test_company_picker_has_an_explicit_membership_refresh_button(tmp_path: Path) -> None:
-    QApplication.instance() or QApplication([])
-    window = TeamsV2Window(TeamsV2Config("https://example.supabase.co", "publishable", tmp_path))
-    assert window.organizations.refresh_button.text() == "회사 목록 다시 확인"
-    assert not window.organizations.refresh_button.isHidden()
-    window.deleteLater()
+def test_company_management_shows_selectable_join_code_and_copies_it() -> None:
+    app = QApplication.instance() or QApplication([]); api = Mock(); api.company_join_code.return_value = "A2B3C"
+    page = CompanyManagementPage(Organization("org", "회사", "OWNER"), api)
+    page.load_join_code()
 
-
-def test_pending_company_opens_the_no_data_approval_screen(tmp_path: Path) -> None:
-    QApplication.instance() or QApplication([])
-    window = TeamsV2Window(TeamsV2Config("https://example.supabase.co", "publishable", tmp_path))
-    window.api.session = Session("access", "refresh", "user-a")
-    window._open_workspace(Organization("org-a", "테스트 회사", "MEMBER", "PENDING"))
-    assert window.stack.currentWidget() is window.pending_approval
-    assert window.pending_approval.company.text() == "테스트 회사"
-    assert window.pending_approval.refresh.text() == "권한 승인 다시 확인"
-    window.deleteLater()
+    assert page.join_code.text() == "A2B3C"
+    assert page.join_code.isReadOnly()
+    assert page.copy_join_code.isEnabled()
+    page._copy_join_code()
+    assert app.clipboard().text() == "A2B3C"
+    page.deleteLater()
 
 
 def test_company_selection_opens_local_ui_against_v2_workspace(tmp_path: Path, monkeypatch) -> None:
@@ -109,6 +80,8 @@ def test_company_selection_opens_local_ui_against_v2_workspace(tmp_path: Path, m
         "cursor": 0, "events": [], "event_tasks": [], "vendors": [], "people": [],
         "master_items": [], "event_vendors": [], "event_freelancers": [],
     })
+    monkeypatch.setattr(window.api, "staff_directory", lambda _organization_id: [])
+    monkeypatch.setattr(window.api, "personal_schedules", lambda _organization_id: [])
 
     window._open_workspace(Organization("org-a", "테스트 회사", "OWNER"))
     for _ in range(50):
@@ -140,6 +113,8 @@ def test_cached_workspace_opens_without_replacing_unsent_local_changes(tmp_path:
         calls["snapshot"] += 1
         return {"cursor": 5, "events": [], "event_tasks": [], "vendors": [], "people": [], "master_items": [], "event_vendors": [], "event_freelancers": []}
     monkeypatch.setattr(window.api, "workspace_snapshot", snapshot)
+    monkeypatch.setattr(window.api, "staff_directory", lambda _organization_id: [])
+    monkeypatch.setattr(window.api, "personal_schedules", lambda _organization_id: [])
     monkeypatch.setattr(window.api, "workspace_changes", lambda _organization_id, _cursor: calls.__setitem__("changes", calls["changes"] + 1) or {"cursor": 5, "changes": []})
     window._open_workspace(organization)
     for _ in range(50):

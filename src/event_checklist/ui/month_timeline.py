@@ -23,6 +23,8 @@ class MonthTimeline(QWidget):
         self.year, self.month = today.year, today.month
         self.selected = today
         self.tasks = []
+        self.personal_schedules = []
+        self.priority_member_user_id = ""
         self.event_period = None
         self._weeks = []
         self._hits: list[tuple[QRectF, str]] = []
@@ -41,6 +43,11 @@ class MonthTimeline(QWidget):
         self.tasks = [dict(row) for row in tasks]
         self.update()
 
+    def set_personal_schedules(self, schedules, priority_member_user_id: str | None = None):
+        self.personal_schedules = [dict(row) for row in schedules]
+        self.priority_member_user_id = str(priority_member_user_id or "")
+        self.update()
+
     def set_event_period(self, event):
         self.event_period = dict(event) if event else None
         self.update()
@@ -57,19 +64,45 @@ class MonthTimeline(QWidget):
         return (task["status"] == "완료", date.fromisoformat(task["due_date"]), task["sort_order"])
 
     def _week_segments(self, week, lane_capacity):
+        """Allocate every visible bar to one shared lane.
+
+        Personal schedules used to be painted at the last task lane after task
+        allocation had finished.  That meant a personal bar could occupy the
+        exact same pixels as either a task or another employee's schedule.
+        Keeping both kinds of entries in this allocator makes each occupied
+        date span reserve its own vertical space.
+        """
         start, end = week[0], week[-1]
         candidates = []
+        # Personal schedules are placed before work items so absence information
+        # stays visible.  The signed-in employee's own schedule is first among
+        # personal schedules, without ever drawing over another entry.
+        def schedule_order(schedule):
+            is_current = str(schedule.get("member_user_id") or "") == self.priority_member_user_id
+            return (not is_current, str(schedule.get("start_date") or ""), str(schedule.get("end_date") or ""), str(schedule.get("remote_id") or schedule.get("id") or ""))
+
+        for schedule in sorted(self.personal_schedules, key=schedule_order):
+            try:
+                schedule_start = date.fromisoformat(str(schedule["start_date"]))
+                schedule_end = date.fromisoformat(str(schedule["end_date"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if schedule_end < start or schedule_start > end:
+                continue
+            first, last = max(schedule_start, start), min(schedule_end, end)
+            candidates.append(("schedule", schedule, (first - start).days, (last - start).days,
+                               schedule_start == first, schedule_end == last))
         for task in sorted(self.tasks, key=self._display_order):
             task_start, task_end = date.fromisoformat(task["planned_start"]), date.fromisoformat(task["due_date"])
             if task_end < start or task_start > end:
                 continue
             first, last = max(task_start, start), min(task_end, end)
-            candidates.append((task, (first - start).days, (last - start).days,
+            candidates.append(("task", task, (first - start).days, (last - start).days,
                                task_start == first, task_end == last))
         lanes: list[list[tuple[int, int]]] = []
         visible, hidden = [], [0] * 7
         for segment in candidates:
-            _, first, last, _, _ = segment
+            _, _, first, last, _, _ = segment
             lane = next((i for i, spans in enumerate(lanes)
                          if all(last < a or first > b for a, b in spans)), len(lanes))
             if lane >= lane_capacity:
@@ -153,11 +186,25 @@ class MonthTimeline(QWidget):
                         event_bar,
                         f"행사: {self.event_period['name']}\n{event_start.isoformat()} ~ {event_end.isoformat()}",
                     ))
-            for lane, task, first, last, is_start, is_end in visible:
+            for lane, kind, entry, first, last, is_start, is_end in visible:
                 x = first * cell_w + (4 if is_start else 0)
                 width = (last - first + 1) * cell_w - (8 if is_start and is_end else 4)
                 bar = QRectF(x, y + task_top_gap + lane * (lane_h + 2), width, lane_h)
-                base = QColor(CATEGORY_COLORS.get(task["major"], "#E5E7EB"))
+                if kind == "schedule":
+                    schedule = entry
+                    color = QColor(schedule.get("color_hex") or "#8AA6BF")
+                    painter.setPen(QPen(color, 2)); painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.drawRoundedRect(bar, 4 if is_start or is_end else 1, 4 if is_start or is_end else 1)
+                    painter.setPen(color); painter.setFont(QFont("Malgun Gothic", 8, QFont.Weight.DemiBold))
+                    label = QFontMetrics(painter.font()).elidedText(
+                        f"{schedule.get('member_name','직원')} · {schedule.get('title','일정')}",
+                        Qt.TextElideMode.ElideRight, max(1, int(bar.width()) - 10),
+                    )
+                    painter.drawText(bar.adjusted(5, 0, -5, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, label)
+                    self._hits.append((bar, f"{schedule.get('member_name','직원')} · {schedule.get('title','일정')}\n{schedule.get('start_date')} ~ {schedule.get('end_date')}"))
+                    continue
+                task = entry
+                base = QColor(task.get("member_color_hex") or CATEGORY_COLORS.get(task["major"], "#E5E7EB"))
                 if task["status"] == "완료": base.setAlpha(120)
                 painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(base)
                 path = QPainterPath(); path.addRoundedRect(bar, 4 if is_start or is_end else 1, 4 if is_start or is_end else 1)

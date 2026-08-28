@@ -1,22 +1,16 @@
 from __future__ import annotations
 
-import argparse
 from ctypes import wintypes
 import os
 import sys
-from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget
 
-from event_checklist import __version__
-from event_checklist.install_service import is_packaged_app
 from event_checklist.theme import application_stylesheet
-from event_checklist.update_service import UpdateInfo, download_update, fetch_latest_release, launch_installer, version_tuple
 from event_checklist.ui.main_window import MainWindow
-from event_checklist.ui.startup_splash import StartupSplash
 from event_checklist.ui.title_bar import app_icon
 
 from .api import ApiError, Organization, TeamsV2Api
@@ -28,6 +22,10 @@ from .sync_store import WorkspaceSnapshotStore
 from .sync_engine import WorkspaceSyncEngine
 from .realtime import RealtimeSignalClient
 from .outbox import WorkspaceOutbox
+from .staff_pages import EmployeeWorkPage, PersonalScheduleDialog
+from .my_space_page import MySpacePage
+from .company_workspace import CompanyWorkspace
+from .company_pages import CompanyWorkPage, CompanyCalendarPage, FinancePage
 
 
 class Worker(QThread):
@@ -42,18 +40,6 @@ class Worker(QThread):
             self.finished.emit(self.task())
         except Exception as exc:
             self.failed.emit(str(exc))
-
-
-def _launch_options(argv: list[str] | None = None):
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--update-health-file", default="")
-    parser.add_argument("--restarting-after-update", action="store_true")
-    return parser.parse_known_args(argv)[0]
-
-
-def _write_update_health_file(path: str) -> None:
-    if path:
-        Path(path).write_text("ok", encoding="ascii")
 
 
 class ShellTitleBar(QFrame):
@@ -148,9 +134,8 @@ class OrganizationPage(QWidget):
         self.company_list = QWidget(); self.company_list.setObjectName("TeamsCompanyList"); self.company_layout = QVBoxLayout(self.company_list); self.company_layout.setContentsMargins(0, 0, 0, 0); self.company_layout.setSpacing(7)
         self.more_button = QPushButton(); self.more_button.setProperty("quiet", True); self.more_button.hide(); self.more_button.clicked.connect(self._show_more)
         self.button = QPushButton("선택한 회사로 시작"); self.button.setProperty("primary", True); self.button.setEnabled(False)
-        self.refresh_button = QPushButton("회사 목록 다시 확인"); self.refresh_button.setProperty("quiet", True); self.refresh_button.clicked.connect(self.load)
         self.retry_button = QPushButton("회사 목록 다시 시도"); self.retry_button.setProperty("quiet", True); self.retry_button.hide(); self.retry_button.clicked.connect(self._retry)
-        card = QFrame(); card.setObjectName("Card"); card.setMaximumWidth(520); layout = QVBoxLayout(card); layout.setContentsMargins(36, 34, 36, 34); layout.addWidget(QLabel("회사 선택", objectName="PageTitle")); layout.addWidget(QLabel("작업할 회사를 선택하면 저장된 작업본을 먼저 열고, 변경분은 뒤에서 조용히 동기화합니다.", objectName="PageDescription")); layout.addWidget(self.message); layout.addWidget(self.company_list); layout.addWidget(self.more_button); layout.addWidget(self.button); layout.addWidget(self.refresh_button)
+        card = QFrame(); card.setObjectName("Card"); card.setMaximumWidth(520); layout = QVBoxLayout(card); layout.setContentsMargins(36, 34, 36, 34); layout.addWidget(QLabel("회사 선택", objectName="PageTitle")); layout.addWidget(QLabel("작업할 회사를 선택하면 저장된 작업본을 먼저 열고, 변경분은 뒤에서 조용히 동기화합니다.", objectName="PageDescription")); layout.addWidget(self.message); layout.addWidget(self.company_list); layout.addWidget(self.more_button); layout.addWidget(self.button)
         layout.addWidget(self.retry_button)
         self.logout_button = QPushButton("로그아웃"); self.logout_button.setProperty("quiet", True); layout.addWidget(self.logout_button)
         root = QVBoxLayout(self); root.setContentsMargins(24, 24, 24, 24); root.addStretch(); root.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter); root.addStretch(); self.button.clicked.connect(self.choose)
@@ -159,21 +144,19 @@ class OrganizationPage(QWidget):
     def load(self) -> None:
         if getattr(self, "worker", None) and self.worker.isRunning():
             return
-        self.button.setEnabled(False); self.refresh_button.setEnabled(False); self.selected_organization = None; self.message.setText("접근 가능한 회사를 확인하는 중…")
+        self.button.setEnabled(False); self.selected_organization = None; self.message.setText("접근 가능한 회사를 확인하는 중…")
         self.retry_button.hide()
         self.worker = Worker(self.api.organizations); self.worker.finished.connect(self._loaded); self.worker.failed.connect(self._failed); self.worker.start()
 
     def _loaded(self, value: object) -> None:
         self._automatic_retries = 0
-        self.refresh_button.setEnabled(True)
         self.organizations = value if isinstance(value, list) else []
         while self.company_layout.count():
             item = self.company_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
         self.company_buttons.clear()
         for index, organization in enumerate(self.organizations):
-            status = "권한 승인 대기" if organization.status == "PENDING" else organization.display_role
-            item = QPushButton(f"{organization.name}\n{status}"); item.setObjectName("TeamsCompanyChoice"); item.setProperty("quiet", True); item.setCheckable(True); item.setVisible(index < 5)
+            item = QPushButton(f"{organization.name}\n{organization.display_role}"); item.setObjectName("TeamsCompanyChoice"); item.setProperty("quiet", True); item.setCheckable(True); item.setVisible(index < 5)
             item.clicked.connect(lambda _checked=False, value=organization: self._select(value))
             self.company_buttons.append(item); self.company_layout.addWidget(item)
         hidden_count = max(0, len(self.organizations) - 5)
@@ -184,7 +167,6 @@ class OrganizationPage(QWidget):
         self.organizations_loaded.emit()
 
     def _failed(self, message: str) -> None:
-        self.refresh_button.setEnabled(True)
         message = message or "회사 목록을 불러오지 못했습니다."
         self.message.setText(message)
         self.retry_button.show()
@@ -214,22 +196,6 @@ class OrganizationPage(QWidget):
         self.more_button.hide()
 
 
-class PendingApprovalPage(QWidget):
-    refresh_requested = Signal()
-
-    def __init__(self) -> None:
-        super().__init__(); self.setObjectName("TeamsPendingApprovalPage")
-        root = QVBoxLayout(self); root.setContentsMargins(36, 36, 36, 36); root.addStretch()
-        card = QFrame(); card.setObjectName("Card"); card.setMaximumWidth(520); box = QVBoxLayout(card); box.setContentsMargins(38, 36, 38, 36)
-        box.addWidget(QLabel("권한 승인 대기", objectName="PageTitle")); self.company = QLabel(); self.company.setObjectName("SectionTitle"); box.addWidget(self.company)
-        box.addWidget(QLabel("아직 권한이 없습니다. 회사 관리자의 승인을 기다리고 있습니다. 승인되면 아래 버튼으로 바로 확인할 수 있습니다.", objectName="PageDescription"))
-        self.refresh = QPushButton("권한 승인 다시 확인"); self.refresh.setProperty("primary", True); self.refresh.clicked.connect(self.refresh_requested); box.addWidget(self.refresh)
-        self.message = QLabel(""); box.addWidget(self.message); root.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter); root.addStretch()
-
-    def show_company(self, organization: Organization) -> None:
-        self.company.setText(organization.name)
-
-
 class ConflictDialog(QDialog):
     """Explicitly choose the server value or retry the user's local value."""
 
@@ -255,22 +221,20 @@ class CompanyManagementPage(QWidget):
 
     guests_requested = Signal()
     members_requested = Signal()
-    company_code_requested = Signal()
-    approvals_requested = Signal()
 
-    def __init__(self, organization: Organization) -> None:
-        super().__init__(); self.setObjectName("TeamsCompanyManagementPage")
+    def __init__(self, organization: Organization, api: TeamsV2Api | None = None) -> None:
+        super().__init__(); self.setObjectName("TeamsCompanyManagementPage"); self.organization = organization; self.api = api
         root = QVBoxLayout(self); root.setContentsMargins(42, 38, 42, 38); root.setSpacing(16)
         root.addWidget(QLabel("회사 관리", objectName="PageTitle"))
         root.addWidget(QLabel(f"{organization.name}의 직원 권한과 프로젝트 게스트를 관리합니다. 플랫폼 관리 기능은 웹앱에서만 제공합니다.", objectName="PageDescription"))
         if organization.role in {"OWNER", "ADMIN"}:
-            approvals = QFrame(); approvals.setObjectName("Card"); approvals_layout = QVBoxLayout(approvals)
-            approvals_row = QHBoxLayout(); approvals_copy = QVBoxLayout(); approvals_copy.addWidget(QLabel("직원 가입 승인", objectName="SectionTitle")); approvals_copy.addWidget(QLabel("회사 코드로 가입한 직원을 승인하고 기본 역할을 부여합니다.")); approvals_row.addLayout(approvals_copy, 1)
-            approvals_button = QPushButton("가입 요청 확인"); approvals_button.setProperty("primary", True); approvals_button.setFixedWidth(156); approvals_button.clicked.connect(self.approvals_requested); approvals_row.addWidget(approvals_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); approvals_layout.addLayout(approvals_row); root.addWidget(approvals)
-            code = QFrame(); code.setObjectName("Card"); code_layout = QVBoxLayout(code)
-            code_row = QHBoxLayout(); code_copy = QVBoxLayout(); code_copy.addWidget(QLabel("직원 가입 코드", objectName="SectionTitle")); code_copy.addWidget(QLabel("일반 직원 가입에만 쓰는 고정 5자리 코드입니다. 게스트는 프로젝트 초대 링크를 사용합니다.")); code_row.addLayout(code_copy, 1)
-            self.company_code_button = QPushButton("회사 코드 복사"); self.company_code_button.setProperty("primary", True); self.company_code_button.setFixedWidth(156); self.company_code_button.clicked.connect(self.company_code_requested); code_row.addWidget(self.company_code_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); code_layout.addLayout(code_row)
-            root.addWidget(code)
+            code_card = QFrame(); code_card.setObjectName("Card"); code_layout = QVBoxLayout(code_card); code_layout.setSpacing(10)
+            code_layout.addWidget(QLabel("직원 초대 회사 코드", objectName="SectionTitle"))
+            code_layout.addWidget(QLabel("직원이 회원가입 화면에서 이 코드를 입력하면 회사 가입을 신청할 수 있습니다. 승인 후 업무를 시작할 수 있습니다."))
+            code_row = QHBoxLayout(); self.join_code = QLineEdit(); self.join_code.setObjectName("CompanyJoinCode"); self.join_code.setReadOnly(True); self.join_code.setPlaceholderText("회사 코드 불러오는 중…"); self.join_code.setMinimumWidth(190); self.join_code.setMaximumWidth(250); self.join_code.setToolTip("코드를 드래그해 선택하거나 복사 버튼을 누르세요."); self.join_code.setStyleSheet("QLineEdit#CompanyJoinCode{background:#FFF7F2;border:1px solid #F5B59D;border-radius:10px;padding:8px 12px;color:#9E3A13;font-size:18px;font-weight:700;letter-spacing:4px;}")
+            self.copy_join_code = QPushButton("코드 복사"); self.copy_join_code.setProperty("primary", True); self.copy_join_code.setEnabled(False); self.copy_join_code.clicked.connect(self._copy_join_code)
+            code_row.addWidget(self.join_code); code_row.addWidget(self.copy_join_code); code_row.addStretch(); code_layout.addLayout(code_row); self.code_message = QLabel(""); self.code_message.setObjectName("Muted"); code_layout.addWidget(self.code_message)
+            root.addWidget(code_card)
             members = QFrame(); members.setObjectName("Card"); member_layout = QVBoxLayout(members)
             member_row = QHBoxLayout(); member_copy = QVBoxLayout(); member_copy.addWidget(QLabel("직원 및 권한", objectName="SectionTitle")); member_copy.addWidget(QLabel("직원 역할, 활성 상태, 화면별 조회·편집 권한을 관리합니다.")); member_row.addLayout(member_copy, 1)
             member_button = QPushButton("직원·권한 관리"); member_button.setProperty("primary", True); member_button.setFixedWidth(156); member_button.clicked.connect(self.members_requested); member_row.addWidget(member_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); member_layout.addLayout(member_row)
@@ -279,11 +243,24 @@ class CompanyManagementPage(QWidget):
         guest_row = QHBoxLayout(); guest_copy = QVBoxLayout(); guest_copy.addWidget(QLabel("프로젝트 게스트 초대", objectName="SectionTitle")); guest_copy.addWidget(QLabel("게스트는 초대된 프로젝트의 체크리스트·달력만 조회합니다. 초대 링크는 한 번만 사용되며 7일 후 만료됩니다.")); guest_row.addLayout(guest_copy, 1)
         guest_button = QPushButton("게스트 초대 관리"); guest_button.setProperty("primary", True); guest_button.setFixedWidth(156); guest_button.clicked.connect(self.guests_requested); guest_row.addWidget(guest_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter); guest_layout.addLayout(guest_row)
         root.addWidget(guests); root.addStretch()
+        if self.api and organization.role in {"OWNER", "ADMIN"}:
+            QTimer.singleShot(0, self.load_join_code)
 
-    def set_company_code_loading(self, loading: bool) -> None:
-        if hasattr(self, "company_code_button"):
-            self.company_code_button.setEnabled(not loading)
-            self.company_code_button.setText("회사 코드 확인 중…" if loading else "회사 코드 복사")
+    def load_join_code(self) -> None:
+        if not self.api:
+            return
+        self.copy_join_code.setEnabled(False); self.join_code.setPlaceholderText("회사 코드 불러오는 중…"); self.code_message.setText("")
+        try:
+            code = self.api.company_join_code(self.organization.id)
+        except ApiError as exc:
+            self.join_code.clear(); self.join_code.setPlaceholderText("회사 코드를 불러오지 못했습니다."); self.code_message.setText(str(exc)); return
+        self.join_code.setText(code); self.join_code.selectAll(); self.copy_join_code.setEnabled(True); self.code_message.setText("코드를 드래그해 선택하거나 ‘코드 복사’ 버튼을 누를 수 있습니다.")
+
+    def _copy_join_code(self) -> None:
+        code = self.join_code.text().strip()
+        if not code:
+            return
+        QApplication.clipboard().setText(code); self.join_code.selectAll(); self.code_message.setText("회사 코드를 클립보드에 복사했습니다.")
 
 
 class CompanyMembersPage(QWidget):
@@ -313,7 +290,7 @@ class CompanyMembersPage(QWidget):
         content = QHBoxLayout(); content.setSpacing(16); root.addLayout(content, 1)
         self.table = QTableWidget(0, 3); self.table.setObjectName("TeamsMemberTable"); self.table.setHorizontalHeaderLabels(["직원", "역할", "접근 상태"]); self.table.horizontalHeader().setStretchLastSection(True); self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers); self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection); self.table.setStyleSheet("QTableWidget#TeamsMemberTable::item:selected { background:#FCE8DE; color:#172033; border-top:1px solid #F15A24; border-bottom:1px solid #F15A24; } QTableWidget#TeamsMemberTable::item:selected:!active { background:#FCE8DE; color:#172033; }"); self.table.setMaximumWidth(480); content.addWidget(self.table, 1)
         detail = QFrame(); detail.setObjectName("Card"); detail_layout = QVBoxLayout(detail); detail_layout.setSpacing(10)
-        self.permission_scroll = QScrollArea(); self.permission_scroll.setObjectName("TeamsPermissionScroll"); self.permission_scroll.setWidgetResizable(True); self.permission_scroll.setFrameShape(QFrame.Shape.NoFrame); self.permission_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.permission_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded); self.permission_scroll.setWidget(detail); content.addWidget(self.permission_scroll, 2)
+        self.permission_scroll = QScrollArea(); self.permission_scroll.setObjectName("TeamsPermissionScroll"); self.permission_scroll.setWidgetResizable(True); self.permission_scroll.setFrameShape(QFrame.Shape.NoFrame); self.permission_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); self.permission_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded); self.permission_scroll.setStyleSheet("QScrollArea#TeamsPermissionScroll{background:#FFFFFF;border:none;} QScrollArea#TeamsPermissionScroll QWidget#qt_scrollarea_viewport{background:#FFFFFF;} QScrollArea#TeamsPermissionScroll > QWidget > QWidget{background:#FFFFFF;}"); self.permission_scroll.viewport().setStyleSheet("background:#FFFFFF;"); self.permission_scroll.setWidget(detail); content.addWidget(self.permission_scroll, 2)
         self.selected_caption = QLabel("선택한 직원", objectName="Muted"); detail_layout.addWidget(self.selected_caption)
         self.person = QLabel("왼쪽에서 직원을 선택하세요.", objectName="SectionTitle"); detail_layout.addWidget(self.person)
         self.email = QLabel(""); self.email.setObjectName("Muted"); detail_layout.addWidget(self.email)
@@ -523,25 +500,25 @@ class GuestInvitationDialog(QDialog):
 class TeamsV2Window(QMainWindow):
     def __init__(self, config: TeamsV2Config) -> None:
         super().__init__(); self.config = config; self.store = SessionStore(); self.api = TeamsV2Api(config); self.workspace_db: WorkspaceDatabase | None = None
-        self.local_window: MainWindow | None = None; self.current_organization: Organization | None = None; self.permission_worker: Worker | None = None; self.snapshot_worker: Worker | None = None; self.changes_worker: Worker | None = None; self.sync_engine: WorkspaceSyncEngine | None = None; self.realtime: RealtimeSignalClient | None = None; self.access_realtime: RealtimeSignalClient | None = None; self._sync_workers: list[Worker] = []; self._opened_cursor = ""; self._opened_with_pending = False; self._force_snapshot = False
-        self.update_info: UpdateInfo | None = None; self.update_progress: StartupSplash | None = None; self.update_check_worker: Worker | None = None; self.update_download_worker: Worker | None = None; self.company_code_worker: Worker | None = None
+        self.local_window: MainWindow | None = None; self.current_organization: Organization | None = None; self.permission_worker: Worker | None = None; self.snapshot_worker: Worker | None = None; self.changes_worker: Worker | None = None; self.sync_engine: WorkspaceSyncEngine | None = None; self.realtime: RealtimeSignalClient | None = None; self._sync_workers: list[Worker] = []; self._opened_cursor = ""; self._opened_with_pending = False
         self.company_management_page: CompanyManagementPage | None = None; self.company_members_page: CompanyMembersPage | None = None; self.guest_management_page: GuestManagementPage | None = None
+        self.company_workspace: CompanyWorkspace | None = None; self.company_work_page: CompanyWorkPage | None = None; self.company_calendar_page: CompanyCalendarPage | None = None; self.company_finance_page: FinancePage | None = None; self.company_v3_buttons: list[QPushButton] = []; self.v3_worker: Worker | None = None; self.v3_mutation_inflight = False; self._v3_initial_open = False
+        self.v3_outbox_timer = QTimer(self); self.v3_outbox_timer.setInterval(1200); self.v3_outbox_timer.timeout.connect(self._flush_v3_outbox); self.v3_outbox_timer.start()
         self.setWindowTitle("이벤트 플로우 Teams V2"); self.setWindowIcon(app_icon()); self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint); self.resize(1440, 900); self.setMinimumSize(1120, 700)
         outer = QWidget(); outer.setObjectName("AppRoot"); outer_layout = QVBoxLayout(outer); outer_layout.setContentsMargins(1, 1, 1, 1); outer_layout.setSpacing(0)
         self.shell_title_bar = ShellTitleBar(self); outer_layout.addWidget(self.shell_title_bar)
         self.stack = QStackedWidget(); outer_layout.addWidget(self.stack, 1); self.setCentralWidget(outer)
-        self.login = LoginPage(self.api); self.organizations = OrganizationPage(self.api); self.pending_approval = PendingApprovalPage()
-        self.stack.addWidget(self.login); self.stack.addWidget(self.organizations); self.stack.addWidget(self.pending_approval)
-        self.login.signed_in.connect(self._signed_in); self.organizations.selected.connect(self._open_workspace); self.organizations.logout_requested.connect(self.logout); self.organizations.organizations_loaded.connect(self._persist_recovered_session); self.pending_approval.refresh_requested.connect(self._force_refresh)
-        if is_packaged_app(): QTimer.singleShot(900, self._check_updates_on_launch)
+        self.login = LoginPage(self.api); self.organizations = OrganizationPage(self.api)
+        self.stack.addWidget(self.login); self.stack.addWidget(self.organizations)
+        self.login.signed_in.connect(self._signed_in); self.organizations.selected.connect(self._open_workspace); self.organizations.logout_requested.connect(self.logout); self.organizations.organizations_loaded.connect(self._persist_recovered_session)
         session = self.store.load()
         if session:
-            self.api.session = session; self._start_access_realtime(); self.stack.setCurrentWidget(self.organizations); self.organizations.load()
+            self.api.session = session; self.stack.setCurrentWidget(self.organizations); self.organizations.load()
 
     def _signed_in(self, session: object) -> None:
         if not isinstance(session, Session):
             return
-        self.store.save(session); self._start_access_realtime(); self.stack.setCurrentWidget(self.organizations); self.organizations.load()
+        self.store.save(session); self.stack.setCurrentWidget(self.organizations); self.organizations.load()
 
     def _persist_recovered_session(self) -> None:
         """Keep a rotated refresh token instead of retrying the expired one next launch."""
@@ -551,10 +528,9 @@ class TeamsV2Window(QMainWindow):
     def _open_workspace(self, organization: Organization) -> None:
         if not self.api.session:
             return
-        if organization.status == "PENDING":
-            self._close_workspace(); self.current_organization = organization; self.pending_approval.show_company(organization); self.stack.setCurrentWidget(self.pending_approval); return
         self._close_workspace()
         self.current_organization = organization
+        self._v3_initial_open = True
         # The Local shell always receives a V2-owned database.  Its content is
         # replaced by the permission-filtered snapshot only after permission
         # verification has succeeded.
@@ -568,6 +544,8 @@ class TeamsV2Window(QMainWindow):
         self.local_window.setParent(self.stack)
         self.local_window.setWindowFlags(Qt.WindowType.Widget)
         self._configure_local_shell(self.local_window, organization)
+        self._install_company_workspace_features(self.local_window, organization)
+        self._install_staff_features(self.local_window, organization)
         self.local_window.setEnabled(False)
         self.stack.addWidget(self.local_window); self.stack.setCurrentWidget(self.local_window); self.shell_title_bar.hide()
         self._set_sync_state("CHECKING", "권한 확인 중…")
@@ -575,6 +553,301 @@ class TeamsV2Window(QMainWindow):
         self.permission_worker.finished.connect(lambda value, oid=organization.id: self._permissions_loaded(oid, value))
         self.permission_worker.failed.connect(lambda message, oid=organization.id: self._permissions_failed(oid, message))
         self.permission_worker.start()
+
+    def _install_staff_features(self, local: MainWindow, organization: Organization) -> None:
+        if not self.api.session:
+            return
+        # Guest invitations remain project-scoped read access.  They must not
+        # discover the company-wide staff board or personal absence schedules.
+        if organization.role == "GUEST":
+            return
+        if self.workspace_db and not self.workspace_db.one("SELECT 1 FROM teams_v2_staff_members WHERE user_id=?", (self.api.session.user_id,)):
+            self.workspace_db.conn.execute(
+                "INSERT INTO teams_v2_staff_members(user_id,display_name,role,job_title,color_hex,status) VALUES (?,?,?,?,?, 'ACTIVE')",
+                (self.api.session.user_id, self.api.session.email.split("@", 1)[0], organization.role, "", "#A7D7F1"),
+            )
+            self.workspace_db.conn.commit()
+        staff_page = EmployeeWorkPage(self.workspace_db, local.open_teams_task, self.api.session.user_id, self._change_my_color, organization.role in {"OWNER", "ADMIN"}, self._transfer_task_member, local)
+        local.install_teams_staff_page(staff_page)
+        self.my_space_page = MySpacePage(self.workspace_db, self.api.session.user_id, self._change_my_color, self._save_personal_schedule_values, self._edit_personal_schedule, self._delete_personal_schedule, self._reorder_my_schedules, self._reorder_my_tasks, self._save_my_task_details, local)
+        local.stack.addWidget(self.my_space_page)
+        my_button = QPushButton("나의 공간"); local.add_company_global_nav_button(my_button)
+        my_button.clicked.connect(lambda: self._show_v3_page(self.my_space_page, my_button))
+        local.calendar.configure_personal_schedules(self.api.session.user_id, self._edit_personal_schedule)
+        local.events.set_staff_assignment_handler(self._assign_task_member)
+        local.events.finance_button.hide()
+
+    def _install_company_workspace_features(self, local: MainWindow, organization: Organization) -> None:
+        """Mount V3 beside Local V2; no existing Local page or outbox is repurposed."""
+        if not self.workspace_db:
+            return
+        self.company_workspace = CompanyWorkspace(self.workspace_db)
+        self.company_calendar_page = CompanyCalendarPage(self.workspace_db, local)
+        local.stack.addWidget(self.company_calendar_page)
+        calendar_button = QPushButton("전체 달력"); calendar_button.setToolTip("모든 프로젝트 업무와 개인 일정을 표시합니다.")
+        local.add_company_global_nav_button(calendar_button)
+        calendar_button.clicked.connect(lambda: self._show_v3_page(self.company_calendar_page, calendar_button))
+        self.company_v3_buttons = [calendar_button]
+        if organization.role == "GUEST":
+            for button in self.company_v3_buttons: button.hide()
+
+    def _show_v3_page(self, page: QWidget | None, button: QPushButton) -> None:
+        if not self.local_window or not page:
+            return
+        for nav in self.local_window.nav_buttons:
+            nav.setChecked(False)
+        button.setChecked(True)
+        if hasattr(page, "refresh"):
+            page.refresh()
+        if hasattr(self, "my_space_page") and page is self.my_space_page:
+            self._refresh_my_task_priorities()
+        self.local_window.stack.setCurrentWidget(page)
+
+    def _refresh_my_task_priorities(self) -> None:
+        if not self.current_organization or not self.workspace_db or not hasattr(self, "my_space_page"):
+            return
+        worker = Worker(lambda: self.api.my_task_priorities(self.current_organization.id))
+        def loaded(value):
+            if not self.workspace_db or not isinstance(value, list): return
+            self.workspace_db.conn.execute("DELETE FROM teams_v2_my_task_priorities")
+            self.workspace_db.conn.executemany("INSERT INTO teams_v2_my_task_priorities(event_task_id,sort_order) VALUES (?,?)", [(str(item["event_task_id"]), int(item.get("sort_order") or 0)) for item in value if isinstance(item, dict) and item.get("event_task_id")])
+            self.workspace_db.conn.commit(); self.my_space_page.refresh()
+        worker.finished.connect(loaded); worker.start(); self._sync_workers.append(worker)
+
+    def _show_project_finance(self, button: QPushButton) -> None:
+        if not self.local_window or not self.workspace_db or not self.company_finance_page or not self.local_window.selected_event_id:
+            self._show_toast("프로젝트를 먼저 선택하세요.")
+            return
+        row = self.workspace_db.one("SELECT remote_id FROM teams_v2_entity_map WHERE entity_type='EVENT' AND local_id=?", (self.local_window.selected_event_id,))
+        if not row:
+            self._show_toast("선택한 프로젝트의 서버 연결을 찾을 수 없습니다.")
+            return
+        self.company_finance_page.select_project(str(row["remote_id"]))
+        self._show_v3_page(self.company_finance_page, button)
+
+    def _open_v3_project(self, remote_event_id: str) -> None:
+        if not self.local_window or not self.workspace_db:
+            return
+        row = self.workspace_db.one("SELECT local_id FROM teams_v2_entity_map WHERE entity_type='EVENT' AND remote_id=?", (remote_event_id,))
+        if not row:
+            self._show_toast("프로젝트 작업본을 아직 받지 못했습니다.")
+            return
+        self.local_window.select_event(int(row["local_id"]))
+        self.local_window.nav_buttons[1].click()
+
+    def _create_finance_from_task(self, task: dict) -> None:
+        """Bridge a selected V2 checklist row into a separately stored V3 actual expense."""
+        if not self.workspace_db or not self.company_finance_page or not self.local_window:
+            self._show_toast("실제 정산 화면을 준비하지 못했습니다.")
+            return
+        event = self.workspace_db.one("SELECT remote_id FROM teams_v2_entity_map WHERE entity_type='EVENT' AND local_id=?", (task.get("event_id"),))
+        item = self.workspace_db.one("SELECT remote_id FROM teams_v2_entity_map WHERE entity_type='EVENT_TASK' AND local_id=?", (task.get("id"),))
+        if not event or not item:
+            self._show_toast("이 업무의 서버 연결을 동기화한 뒤 다시 시도하세요.")
+            return
+        self.company_finance_page.begin_from_task(str(event["remote_id"]), str(item["remote_id"]), str(task.get("name") or "업무 실제 정산"))
+        button = next((candidate for candidate in self.company_v3_buttons if candidate.text() == "정산내역"), None)
+        if button:
+            self._show_v3_page(self.company_finance_page, button)
+
+    def _load_v3_workspace(self) -> None:
+        if not self.current_organization or not self.company_workspace or (self.v3_worker and self.v3_worker.isRunning()):
+            return
+        organization_id = self.current_organization.id
+        cursor = self.company_workspace.cursor()
+        self.v3_worker = Worker(lambda: self.api.workspace_v3_changes(organization_id, cursor) if cursor else self.api.workspace_v3_snapshot(organization_id))
+        self.v3_worker.finished.connect(lambda value, oid=organization_id, was_snapshot=not bool(cursor): self._v3_loaded(oid, value, was_snapshot))
+        self.v3_worker.failed.connect(lambda message: self._show_toast(f"회사 전체 업무 동기화 보류: {message}"))
+        self.v3_worker.start()
+
+    def _v3_loaded(self, organization_id: str, value: object, was_snapshot: bool) -> None:
+        if not self.current_organization or self.current_organization.id != organization_id or not self.company_workspace or not isinstance(value, dict):
+            return
+        try:
+            (self.company_workspace.apply_snapshot(value) if was_snapshot else self.company_workspace.apply_changes(value))
+            if self.company_calendar_page: self.company_calendar_page.refresh()
+            if self.local_window and hasattr(self.local_window, "staff_work_page"):
+                self.local_window.staff_work_page.refresh()
+            if hasattr(self, "my_space_page"): self.my_space_page.refresh()
+            if self._v3_initial_open and self.company_calendar_page and self.local_window:
+                self._v3_initial_open = False
+                button = next((item for item in self.local_window.findChildren(QPushButton) if item.text() == "전체 달력"), None)
+                if button:
+                    self._show_v3_page(self.company_calendar_page, button)
+        except Exception as exc:
+            self._show_toast(f"회사 전체 업무 반영 실패: {exc}")
+
+    def _queue_v3(self, operation: str, payload: dict) -> None:
+        if not self.company_workspace or not self.current_organization:
+            return
+        self.company_workspace.queue(operation, payload)
+        self._flush_v3_outbox()
+
+    def _flush_v3_outbox(self) -> None:
+        if not self.company_workspace or not self.current_organization or self.v3_mutation_inflight:
+            return
+        prepared = self.company_workspace.next_mutation()
+        if not prepared:
+            return
+        entry, mutation = prepared
+        self.v3_mutation_inflight = True
+        self._run_sync_network(
+            lambda: self.api.apply_v3_mutations(self.current_organization.id, [mutation]),
+            lambda value: self._v3_mutation_saved(entry, value),
+            lambda message: self._v3_mutation_transport_failed(entry, message),
+        )
+
+    def _v3_mutation_saved(self, entry: dict, value: object) -> None:
+        self.v3_mutation_inflight = False
+        if not self.company_workspace or not isinstance(value, dict):
+            return
+        outcome = self.company_workspace.apply_mutation_response(entry, value)
+        if outcome == "APPLIED":
+            if self.company_work_page: self.company_work_page.refresh()
+            if self.company_calendar_page: self.company_calendar_page.refresh()
+            if self.company_finance_page: self.company_finance_page.refresh()
+            if hasattr(self, "my_space_page"): self.my_space_page.refresh()
+            self._show_toast("회사 전체 업무 변경을 저장했습니다.")
+        else:
+            self._show_toast("회사 전체 업무 변경을 확인해야 합니다.")
+        QTimer.singleShot(0, self._flush_v3_outbox)
+
+    def _v3_mutation_transport_failed(self, entry: dict, message: str) -> None:
+        self.v3_mutation_inflight = False
+        if self.company_workspace:
+            self.company_workspace.record_transport_failure(entry, message or "서버 연결을 확인할 수 없습니다.")
+        self._show_toast("회사 전체 업무 변경을 오프라인 대기열에 보관했습니다.")
+
+    def _change_my_color(self, color_hex: str) -> None:
+        if not self.current_organization or not self.workspace_db or not self.api.session or not self.local_window:
+            return
+        try:
+            self.api.save_member_profile(self.current_organization.id, self.api.session.user_id, color_hex=color_hex)
+            self.workspace_db.conn.execute("UPDATE teams_v2_staff_members SET color_hex=? WHERE user_id=?", (color_hex, self.api.session.user_id)); self.workspace_db.conn.commit()
+            self.local_window.calendar.refresh()
+            if hasattr(self.local_window, "staff_work_page"): self.local_window.staff_work_page.refresh()
+            if hasattr(self, "my_space_page"): self.my_space_page.refresh()
+        except ApiError as exc:
+            QMessageBox.warning(self.local_window, "직원 색상 저장 실패", str(exc))
+
+    def _edit_personal_schedule(self, schedule) -> None:
+        if not self.current_organization or not self.workspace_db or not self.local_window:
+            return
+        dialog = PersonalScheduleDialog(schedule if isinstance(schedule, dict) else None, self.local_window)
+        if not dialog.exec():
+            return
+        values = dialog.values()
+        self._save_personal_schedule_values(values, str(schedule.get("id")) if isinstance(schedule, dict) and schedule.get("id") else None)
+
+    def _save_personal_schedule_values(self, values: dict, schedule_id: str | None = None) -> bool:
+        if not self.current_organization or not self.workspace_db or not self.local_window:
+            return False
+        try:
+            saved = self.api.save_personal_schedule(self.current_organization.id, schedule_id, values["start_date"], values["end_date"], values["title"], values.get("content", ""))
+            WorkspaceSnapshotStore(self.workspace_db)._upsert_personal_schedule(saved)
+            self.workspace_db.conn.commit(); self.local_window.calendar.refresh()
+            if hasattr(self, "company_calendar_page"): self.company_calendar_page.refresh()
+            if hasattr(self, "my_space_page"): self.my_space_page.refresh()
+            return True
+        except ApiError as exc:
+            QMessageBox.warning(self.local_window, "개인 일정 저장 실패", str(exc)); return False
+
+    def _delete_personal_schedule(self, schedule: dict) -> None:
+        if not self.current_organization or not self.workspace_db or not self.local_window:
+            return
+        if QMessageBox.question(self.local_window, "개인 일정 삭제", f"‘{schedule.get('title', '')}’ 일정을 삭제할까요?") != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.api.delete_personal_schedule(self.current_organization.id, str(schedule["id"]))
+            self.workspace_db.conn.execute("DELETE FROM teams_v2_personal_schedules WHERE id=?", (str(schedule["id"]),)); self.workspace_db.conn.commit(); self.local_window.calendar.refresh()
+            if hasattr(self, "my_space_page"): self.my_space_page.refresh()
+        except ApiError as exc:
+            QMessageBox.warning(self.local_window, "개인 일정 삭제 실패", str(exc))
+
+    def _reorder_my_schedules(self, schedule_ids: list[str]) -> None:
+        if not self.current_organization or not self.workspace_db:
+            return
+        try:
+            self.api.reorder_my_personal_schedules(self.current_organization.id, schedule_ids)
+            for position, schedule_id in enumerate(schedule_ids, 1): self.workspace_db.conn.execute("UPDATE teams_v2_personal_schedules SET sort_order=? WHERE id=?", (position, schedule_id))
+            self.workspace_db.conn.commit()
+        except ApiError as exc:
+            self._show_toast(f"개인 일정 순서 저장 실패: {exc}")
+
+    def _reorder_my_tasks(self, task_ids: list[str]) -> None:
+        if not self.current_organization or not self.workspace_db:
+            return
+        try:
+            self.api.reorder_my_tasks(self.current_organization.id, task_ids)
+            self.workspace_db.conn.execute("DELETE FROM teams_v2_my_task_priorities")
+            self.workspace_db.conn.executemany("INSERT INTO teams_v2_my_task_priorities(event_task_id,sort_order) VALUES (?,?)", [(task_id, index) for index, task_id in enumerate(task_ids, 1)])
+            self.workspace_db.conn.commit()
+        except ApiError as exc:
+            self._show_toast(f"내 업무 순서 저장 실패: {exc}")
+
+    def _save_my_task_details(self, task_id: str, values: dict) -> bool:
+        if not self.workspace_db or not self.company_workspace:
+            return False
+        task = self.workspace_db.one("SELECT row_version FROM teams_v3_work_items WHERE remote_id=?", (task_id,))
+        if not task:
+            return False
+        self._queue_v3("WORK_PATCH", {"id": task_id, "expected_row_version": int(task["row_version"] or 0), **values})
+        return True
+
+    def _open_v3_task(self, remote_task_id: str) -> None:
+        if not self.workspace_db or not self.local_window:
+            return
+        row = self.workspace_db.one("SELECT local_id FROM teams_v2_entity_map WHERE entity_type='EVENT_TASK' AND remote_id=?", (remote_task_id,))
+        if row: self.local_window.open_teams_task(int(row["local_id"]))
+
+    def _assign_task_member(self, task, member_user_id) -> bool:
+        return self._save_task_member(task, member_user_id, transfer=False)
+
+    def _transfer_task_member(self, task_id: str, member_user_id: str) -> bool:
+        if not self.workspace_db:
+            return False
+        # V3 company-wide cards keep their server UUID.  Queue that explicit
+        # assignment through the manager-only transfer RPC so both the new
+        # assignee and the prior assignee receive the existing app notice.
+        if not str(task_id).isdigit():
+            task = self.workspace_db.one("SELECT * FROM teams_v3_work_items WHERE remote_id=?", (str(task_id),))
+            if not task or not self.company_workspace or not self.current_organization:
+                return False
+            try:
+                saved = self.api.transfer_task_member(self.current_organization.id, str(task_id), str(member_user_id), int(task["row_version"] or 0))
+                self.company_workspace.apply_changes({"cursor": self.company_workspace.cursor(), "changes": [{"entity_type": "WORK_ITEM", "entity_key": str(task_id), "operation": "UPSERT", "payload": saved}]})
+                if self.local_window and hasattr(self.local_window, "staff_work_page"): self.local_window.staff_work_page.refresh()
+                if self.company_work_page: self.company_work_page.refresh()
+                if self.company_calendar_page: self.company_calendar_page.refresh()
+                return True
+            except ApiError as exc:
+                QMessageBox.warning(self.local_window, "업무 이관 실패", str(exc)); return False
+        task = self.workspace_db.one("SELECT * FROM event_tasks WHERE id=?", (int(task_id),))
+        if not task:
+            return False
+        return self._save_task_member(task, member_user_id, transfer=True)
+
+    def _save_task_member(self, task, member_user_id, transfer: bool) -> bool:
+        if not self.current_organization or not self.workspace_db:
+            return False
+        mapping = self.workspace_db.one("SELECT remote_id,remote_version FROM teams_v2_entity_map WHERE entity_type='EVENT_TASK' AND local_id=?", (int(task["id"]),))
+        if not mapping:
+            QMessageBox.warning(self.local_window, "담당자 지정", "서버 업무 연결을 찾을 수 없습니다.")
+            return False
+        try:
+            saved = (self.api.transfer_task_member(self.current_organization.id, str(mapping["remote_id"]), str(member_user_id), int(mapping["remote_version"] or 0)) if transfer
+                     else self.api.assign_task_member(self.current_organization.id, str(mapping["remote_id"]), str(member_user_id) if member_user_id else None, int(mapping["remote_version"] or 0)))
+            with self.workspace_db.applying_remote_changes():
+                self.workspace_db.conn.execute("UPDATE event_tasks SET assigned_member_user_id=? WHERE id=?", (saved.get("assigned_member_user_id"), int(task["id"])))
+                self.workspace_db.conn.execute("UPDATE teams_v2_entity_map SET remote_version=?,remote_updated_at=? WHERE entity_type='EVENT_TASK' AND local_id=?", (int(saved.get("row_version") or mapping["remote_version"]), str(saved.get("updated_at") or ""), int(task["id"])))
+            self.workspace_db.conn.commit()
+            if self.local_window:
+                self.local_window.refresh_all(self.local_window.selected_event_id)
+                if transfer: self._show_toast("업무를 이관했습니다. 담당자에게 알림을 보냈습니다.")
+            return True
+        except ApiError as exc:
+            QMessageBox.warning(self.local_window, "업무 이관 실패" if transfer else "담당자 지정 실패", str(exc))
+            return False
 
     def _configure_local_shell(self, local: MainWindow, organization: Organization) -> None:
         """Inject Teams controls into Local's title bar without editing Local files."""
@@ -586,9 +859,8 @@ class TeamsV2Window(QMainWindow):
         title_layout = local.title_bar.layout()
         self.sync_dot = QLabel(); self.sync_dot.setObjectName("TeamsSyncDot"); self.sync_dot.setFixedSize(10, 10)
         self.sync_text = QLabel(); self.sync_text.setObjectName("TeamsSyncText")
-        self.sync_refresh = QPushButton("↻"); self.sync_refresh.setObjectName("TeamsSyncRefresh"); self.sync_refresh.setFixedSize(24, 24); self.sync_refresh.setToolTip("서버 변경사항 및 권한 다시 확인"); self.sync_refresh.clicked.connect(self._force_refresh)
         insert_at = max(0, title_layout.count() - 3)
-        for offset, widget in enumerate((self.sync_dot, self.sync_text, self.sync_refresh)):
+        for offset, widget in enumerate((self.sync_dot, self.sync_text)):
             title_layout.insertWidget(insert_at + offset, widget)
         self._replace_title_control(local.title_bar.minimum, self.showMinimized)
         self._replace_title_control(local.title_bar.maximum, self._toggle_maximized)
@@ -614,14 +886,11 @@ class TeamsV2Window(QMainWindow):
         if organization.role not in {"OWNER", "ADMIN", "PM", "MEMBER"}:
             return
         button = QPushButton("♙  회사 관리" if organization.role in {"OWNER", "ADMIN"} else "♙  게스트 초대")
-        button.setProperty("nav", True); button.setToolTip("직원·권한 관리와 프로젝트 게스트 초대" if organization.role in {"OWNER", "ADMIN"} else "내가 접근할 수 있는 프로젝트에 게스트를 초대")
-        layout = local.sidebar.layout(); insert_at = max(0, layout.count() - 5)
-        layout.insertWidget(insert_at, button)
-        self.company_management_page = CompanyManagementPage(organization)
+        button.setToolTip("직원·권한 관리와 프로젝트 게스트 초대" if organization.role in {"OWNER", "ADMIN"} else "내가 접근할 수 있는 프로젝트에 게스트를 초대")
+        local.add_company_management_nav_button(button)
+        self.company_management_page = CompanyManagementPage(organization, self.api)
         self.company_management_page.guests_requested.connect(self._show_guest_management_page)
         self.company_management_page.members_requested.connect(self._show_company_members_page)
-        self.company_management_page.company_code_requested.connect(self._copy_company_join_code)
-        self.company_management_page.approvals_requested.connect(self._review_pending_employee_requests)
         local.stack.addWidget(self.company_management_page)
         self.company_members_page = CompanyMembersPage(self.api, organization)
         self.company_members_page.back_requested.connect(lambda: local.stack.setCurrentWidget(self.company_management_page))
@@ -635,36 +904,8 @@ class TeamsV2Window(QMainWindow):
     def _show_company_management(self, button: QPushButton) -> None:
         if not self.local_window or not self.company_management_page:
             return
-        for nav in self.local_window.nav_buttons:
-            nav.setChecked(False)
         button.setChecked(True)
         self.local_window.stack.setCurrentWidget(self.company_management_page)
-
-    def _copy_company_join_code(self) -> None:
-        if not self.current_organization or not self.company_management_page:
-            return
-        if self.company_code_worker and self.company_code_worker.isRunning():
-            return
-        organization_id = self.current_organization.id
-        self.company_management_page.set_company_code_loading(True)
-        self.company_code_worker = Worker(lambda: self.api.company_join_code(organization_id))
-        self.company_code_worker.finished.connect(self._company_join_code_loaded)
-        self.company_code_worker.failed.connect(self._company_join_code_failed)
-        self.company_code_worker.start()
-
-    def _company_join_code_loaded(self, value: object) -> None:
-        if self.company_management_page:
-            self.company_management_page.set_company_code_loading(False)
-        if not isinstance(value, str) or len(value) != 5:
-            self._show_toast("회사 코드를 확인하지 못했습니다.")
-            return
-        QApplication.clipboard().setText(value)
-        self._show_toast(f"회사 코드 {value}를 클립보드에 복사했습니다.")
-
-    def _company_join_code_failed(self, _message: str) -> None:
-        if self.company_management_page:
-            self.company_management_page.set_company_code_loading(False)
-        self._show_toast("회사 코드를 불러오지 못했습니다. 관리자 권한을 확인해 주세요.")
 
     def _show_guest_management_page(self) -> None:
         if not self.local_window or not self.guest_management_page:
@@ -676,34 +917,6 @@ class TeamsV2Window(QMainWindow):
             return
         self.local_window.stack.setCurrentWidget(self.company_members_page)
         self.company_members_page.load()
-
-    def _review_pending_employee_requests(self) -> None:
-        if not self.current_organization:
-            return
-        try:
-            requests = self.api.pending_employee_requests(self.current_organization.id)
-        except ApiError as exc:
-            self._show_toast(str(exc)); return
-        if not requests:
-            self._show_toast("승인 대기 중인 직원 가입 요청이 없습니다."); return
-        labels = [f"{item.get('display_name') or item.get('email')} · {item.get('email')}" for item in requests]
-        selected, ok = QInputDialog.getItem(self, "직원 가입 승인", "가입 요청", labels, 0, False)
-        if not ok: return
-        request = requests[labels.index(selected)]
-        decision = QMessageBox.question(self, "직원 가입 요청", "예: 승인\n아니요: 반려", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Yes)
-        if decision == QMessageBox.StandardButton.Cancel: return
-        if decision == QMessageBox.StandardButton.No:
-            try: self.api.review_employee_request(str(request["id"]), "REJECTED")
-            except ApiError as exc: self._show_toast(str(exc)); return
-            self._show_toast("직원 가입 요청을 반려했습니다."); return
-        role_label, ok = QInputDialog.getItem(self, "역할 선택", "승인할 역할", ["일반 직원", "조회 전용", "프로젝트 매니저", "회사 관리자"], 0, False)
-        if not ok: return
-        role = {"일반 직원":"MEMBER", "조회 전용":"VIEWER", "프로젝트 매니저":"PM", "회사 관리자":"ADMIN"}[role_label]
-        try:
-            self.api.review_employee_request(str(request["id"]), "APPROVED", role)
-        except ApiError as exc:
-            self._show_toast(str(exc)); return
-        self._show_toast("직원 가입을 승인했습니다.")
 
     @staticmethod
     def _replace_title_control(button: QPushButton, callback: Callable[[], None]) -> None:
@@ -721,8 +934,9 @@ class TeamsV2Window(QMainWindow):
             return
         permissions = set(value) if isinstance(value, set) else set()
         self.workspace_db.set_access_context(role=self.current_organization.role, permissions=permissions)
+        self._apply_v3_menu_permissions(permissions)
         cursor = self._opened_cursor
-        if cursor and not self._force_snapshot:
+        if cursor:
             # A synchronized Local workspace is immediately usable.  Never
             # overwrite its outbox with a complete snapshot on later starts.
             controller = TeamsPermissionController(self.local_window, permissions, self.current_organization.role)
@@ -732,6 +946,10 @@ class TeamsV2Window(QMainWindow):
             # user edit made during that request is never left unsent.
             self._start_sync_engine()
             self._start_realtime()
+            self._load_v3_workspace()
+            self.staff_directory_worker = Worker(lambda: self.api.staff_directory(organization_id))
+            self.staff_directory_worker.finished.connect(lambda members, oid=organization_id: self._staff_directory_loaded(oid, members))
+            self.staff_directory_worker.start()
             if self._opened_with_pending:
                 return
             self._set_sync_state("CHECKING", "서버 변경분 확인 중…")
@@ -741,13 +959,61 @@ class TeamsV2Window(QMainWindow):
             self.changes_worker.start()
             return
         self._set_sync_state("CHECKING", "회사 작업본 확인 중…")
-        self.snapshot_worker = Worker(lambda: self.api.workspace_snapshot(organization_id))
+        self.snapshot_worker = Worker(lambda: self._workspace_snapshot_with_staff(organization_id))
         self.snapshot_worker.finished.connect(lambda snapshot, oid=organization_id, granted=permissions: self._snapshot_loaded(oid, granted, snapshot))
         self.snapshot_worker.failed.connect(lambda message, oid=organization_id: self._snapshot_failed(oid, message))
         self.snapshot_worker.start()
 
+    def _apply_v3_menu_permissions(self, permissions: set[str]) -> None:
+        """Mirror server visibility rules in the V3 shell; RPC remains final authority."""
+        if not self.current_organization:
+            return
+        global_visible = self.current_organization.role != "GUEST"
+        for index, button in enumerate(self.company_v3_buttons):
+            if index < 2:
+                button.setVisible(global_visible)
+            else:
+                button.setVisible(global_visible and "settlement.view" in permissions)
+        if self.company_work_page:
+            self.company_work_page.configure_access("checklist.structure" in permissions)
+        if self.local_window:
+            self.local_window.events.finance_button.hide()
+        if self.company_finance_page:
+            self.company_finance_page.configure_access(
+                can_edit="settlement.edit" in permissions,
+                allow_company=self.current_organization.role in {"OWNER", "ADMIN"},
+            )
+
+    def _staff_directory_loaded(self, organization_id: str, members: object) -> None:
+        if not self.current_organization or self.current_organization.id != organization_id or not self.workspace_db or not self.local_window:
+            return
+        if not isinstance(members, list):
+            return
+        try:
+            WorkspaceSnapshotStore(self.workspace_db).replace_staff_members([item for item in members if isinstance(item, dict)])
+            self.workspace_db.conn.commit(); self.local_window.refresh_all(self.local_window.selected_event_id)
+        except Exception:
+            return
+
+    def _workspace_snapshot_with_staff(self, organization_id: str) -> dict:
+        snapshot = self.api.workspace_snapshot(organization_id)
+        # New desktop clients stay usable against a server that has not yet
+        # received this optional feature migration; the owner still sees a
+        # clearly labelled local card instead of a broken blank canvas.
+        try:
+            snapshot["staff_members"] = self.api.staff_directory(organization_id)
+            snapshot["personal_schedules"] = self.api.personal_schedules(organization_id)
+        except ApiError:
+            snapshot["staff_members"] = []
+            snapshot["personal_schedules"] = []
+        snapshot["my_task_priorities"] = []
+        try:
+            snapshot["transfer_notifications"] = self.api.pop_task_transfer_notifications(organization_id)
+        except Exception:
+            snapshot["transfer_notifications"] = []
+        return snapshot
+
     def _snapshot_loaded(self, organization_id: str, permissions: set[str], snapshot: object) -> None:
-        self._force_snapshot = False
         if not self.current_organization or self.current_organization.id != organization_id or not self.local_window or not self.workspace_db:
             return
         if not isinstance(snapshot, dict):
@@ -755,7 +1021,16 @@ class TeamsV2Window(QMainWindow):
             return
         try:
             WorkspaceSnapshotStore(self.workspace_db).apply_snapshot(snapshot)
+            if self.api.session and not self.workspace_db.one("SELECT 1 FROM teams_v2_staff_members WHERE user_id=?", (self.api.session.user_id,)):
+                self.workspace_db.conn.execute(
+                    "INSERT INTO teams_v2_staff_members(user_id,display_name,role,job_title,color_hex,status) VALUES (?,?,?,?,?, 'ACTIVE')",
+                    (self.api.session.user_id, self.api.session.email.split("@", 1)[0], self.current_organization.role, "", "#A7D7F1"),
+                )
+                self.workspace_db.conn.commit()
             self.local_window.refresh_all()
+            for notice in snapshot.get("transfer_notifications", []):
+                if isinstance(notice, dict) and notice.get("message"):
+                    self._show_toast(str(notice["message"]))
         except Exception as exc:
             self._snapshot_failed(organization_id, str(exc))
             return
@@ -765,6 +1040,7 @@ class TeamsV2Window(QMainWindow):
         self._set_sync_state("LOCAL", "동기화 완료")
         self._start_sync_engine()
         self._start_realtime()
+        self._load_v3_workspace()
 
     def _changes_loaded(self, organization_id: str, changes: object) -> None:
         if not self.current_organization or self.current_organization.id != organization_id or not self.local_window or not self.workspace_db:
@@ -812,43 +1088,6 @@ class TeamsV2Window(QMainWindow):
         self.sync_dot.setStyleSheet(f"background:{color}; border-radius:5px;")
         self.sync_dot.setToolTip(detail or text); self.sync_text.setText(text); self.sync_text.setToolTip(detail or text)
 
-    def _start_access_realtime(self) -> None:
-        if self.access_realtime or not self.api.session:
-            return
-        self.access_realtime = RealtimeSignalClient(self.config.supabase_url, self.config.publishable_key, self.api.session.access_token, self.api.session.user_id, "teams_v2_access_signals", "user_id")
-        self.access_realtime.changed.connect(self._force_refresh)
-        self.access_realtime.start()
-
-    def _force_refresh(self) -> None:
-        if not self.api.session:
-            return
-        if self.local_window and self.workspace_db and self.workspace_db.pending_outbox():
-            self._show_toast("로컬 변경을 동기화한 뒤 서버 내용을 다시 확인해 주세요."); return
-        if getattr(self, "access_refresh_worker", None) and self.access_refresh_worker.isRunning():
-            return
-        if hasattr(self, "sync_refresh"): self.sync_refresh.setEnabled(False)
-        self._set_sync_state("CHECKING", "서버 변경사항 확인 중…") if hasattr(self, "sync_dot") else None
-        self.access_refresh_worker = Worker(self.api.organizations)
-        self.access_refresh_worker.finished.connect(self._force_refresh_loaded)
-        self.access_refresh_worker.failed.connect(self._force_refresh_failed)
-        self.access_refresh_worker.start()
-
-    def _force_refresh_loaded(self, value: object) -> None:
-        if hasattr(self, "sync_refresh"): self.sync_refresh.setEnabled(True)
-        organizations = value if isinstance(value, list) else []
-        self.organizations.organizations = organizations
-        target = next((item for item in organizations if self.current_organization and item.id == self.current_organization.id), None)
-        if target is None:
-            self._close_workspace(); self.current_organization = None; self.stack.setCurrentWidget(self.organizations); self.organizations._loaded(organizations); return
-        if target.status == "PENDING":
-            self._open_workspace(target); return
-        self._force_snapshot = True
-        self._open_workspace(target)
-
-    def _force_refresh_failed(self, message: str) -> None:
-        if hasattr(self, "sync_refresh"): self.sync_refresh.setEnabled(True)
-        self._set_sync_state("ERROR", "서버 변경사항 확인 실패", message)
-
     def _show_company_picker(self) -> None:
         # Close the embedded Local shell first, then defer page activation
         # until Qt has completed the button click, so the company list never
@@ -858,53 +1097,6 @@ class TeamsV2Window(QMainWindow):
 
     def _finish_show_company_picker(self) -> None:
         self.shell_title_bar.show(); self.stack.setCurrentWidget(self.organizations); self.organizations.load()
-
-    def _check_updates_on_launch(self) -> None:
-        """Apply a newer public release before the user starts work."""
-        if self.update_check_worker and self.update_check_worker.isRunning():
-            return
-        self.update_check_worker = Worker(fetch_latest_release)
-        self.update_check_worker.finished.connect(self._update_check_finished)
-        self.update_check_worker.failed.connect(lambda _message: None)
-        self.update_check_worker.start()
-
-    def _update_check_finished(self, value: object) -> None:
-        info = value if isinstance(value, UpdateInfo) else None
-        if not info or not info.asset_url or version_tuple(info.version) <= version_tuple(__version__):
-            return
-        self.update_info = info
-        self._download_and_apply_update()
-
-    def _download_and_apply_update(self) -> None:
-        if not self.update_info or self.update_download_worker:
-            return
-        self.setEnabled(False)
-        self.update_progress = StartupSplash()
-        self.update_progress.setWindowTitle("EventFlow Teams 업데이트")
-        self.update_progress.show()
-        self.update_progress.set_status(f"새 버전 {self.update_info.version}을 내려받고 있습니다…")
-        self.update_download_worker = Worker(lambda: download_update(self.update_info))
-        self.update_download_worker.finished.connect(self._update_downloaded)
-        self.update_download_worker.failed.connect(self._update_failed)
-        self.update_download_worker.start()
-
-    def _update_downloaded(self, archive: object) -> None:
-        if not isinstance(archive, Path) or not self.update_info:
-            self._update_failed("업데이트 파일을 확인하지 못했습니다."); return
-        if self.update_progress:
-            self.update_progress.set_status("설치를 준비하고 있습니다. 잠시 후 자동으로 다시 시작합니다…")
-        try:
-            launch_installer(archive, self.update_info, os.getpid())
-        except Exception as exc:
-            self._update_failed(str(exc)); return
-        QTimer.singleShot(700, QApplication.quit)
-
-    def _update_failed(self, _message: str) -> None:
-        # A temporary GitHub or network failure must never block normal login.
-        if self.update_progress:
-            self.update_progress.close(); self.update_progress = None
-        self.update_download_worker = None
-        self.setEnabled(True)
 
     def _close_workspace(self) -> None:
         if self.realtime:
@@ -927,6 +1119,7 @@ class TeamsV2Window(QMainWindow):
             self.local_window.deleteLater()
             self.local_window = None
         self.company_management_page = None; self.company_members_page = None; self.guest_management_page = None
+        self.company_workspace = None; self.company_work_page = None; self.company_calendar_page = None; self.company_finance_page = None; self.v3_worker = None; self.v3_mutation_inflight = False; self._v3_initial_open = False
         if self.workspace_db:
             self.workspace_db.close(); self.workspace_db = None
         self.current_organization = None
@@ -1026,9 +1219,21 @@ class TeamsV2Window(QMainWindow):
         if (not self.current_organization or not self.workspace_db or not self.local_window
                 or self.workspace_db.pending_outbox() or (self.changes_worker and self.changes_worker.isRunning())):
             return
+        self._load_v3_workspace()
         row = self.workspace_db.one("SELECT remote_cursor FROM teams_v2_workspace WHERE singleton=1")
         cursor = int(row["remote_cursor"] or 0) if row else 0
-        self.changes_worker = Worker(lambda: self.api.workspace_changes(self.current_organization.id, cursor))
+        def load_changes():
+            changes = self.api.workspace_changes(self.current_organization.id, cursor)
+            try:
+                changes["my_task_priorities"] = self.api.my_task_priorities(self.current_organization.id)
+            except Exception:
+                changes["my_task_priorities"] = []
+            try:
+                changes["transfer_notifications"] = self.api.pop_task_transfer_notifications(self.current_organization.id)
+            except Exception:
+                changes["transfer_notifications"] = []
+            return changes
+        self.changes_worker = Worker(load_changes)
         self.changes_worker.finished.connect(lambda changes, oid=self.current_organization.id: self._realtime_changes_loaded(oid, changes))
         self.changes_worker.failed.connect(lambda message, oid=self.current_organization.id: self._changes_failed(oid, message))
         self.changes_worker.start()
@@ -1041,11 +1246,19 @@ class TeamsV2Window(QMainWindow):
         affected = self._current_event_task_ids(changes)
         try:
             applied = WorkspaceSnapshotStore(self.workspace_db).apply_changes(changes)
+            if "my_task_priorities" in changes:
+                self.workspace_db.conn.execute("DELETE FROM teams_v2_my_task_priorities")
+                self.workspace_db.conn.executemany("INSERT INTO teams_v2_my_task_priorities(event_task_id,sort_order) VALUES (?,?)", [(str(item["event_task_id"]), int(item.get("sort_order") or 0)) for item in changes["my_task_priorities"] if isinstance(item, dict) and item.get("event_task_id")])
+                self.workspace_db.conn.commit()
             if applied:
                 self.local_window.refresh_all(self.local_window.selected_event_id)
+                if hasattr(self, "my_space_page"): self.my_space_page.refresh()
                 if affected:
                     QTimer.singleShot(80, lambda ids=affected: self._flash_task_rows(ids))
                     self._show_toast(f"현재 프로젝트 변경 {len(affected)}건을 반영했습니다.")
+            for notice in changes.get("transfer_notifications", []):
+                if isinstance(notice, dict) and notice.get("message"):
+                    self._show_toast(str(notice["message"]))
         except Exception as exc:
             self._changes_failed(organization_id, str(exc))
 
@@ -1082,8 +1295,6 @@ class TeamsV2Window(QMainWindow):
     def logout(self) -> None:
         session = self.api.session
         self._close_workspace()
-        if self.access_realtime:
-            self.access_realtime.stop(); self.access_realtime.wait(500); self.access_realtime.deleteLater(); self.access_realtime = None
         if session:
             try:
                 clear_user_workspaces(self.config.data_root, session.user_id)
@@ -1117,9 +1328,8 @@ class TeamsV2Window(QMainWindow):
         return super().nativeEvent(event_type, message)
 
 
-def main(argv: list[str] | None = None) -> None:
-    options = _launch_options(argv if argv is not None else sys.argv[1:])
-    app = QApplication(sys.argv[:1])
+def main() -> None:
+    app = QApplication(sys.argv)
     app.setApplicationName("이벤트 플로우 Teams V2")
     app.setStyleSheet(application_stylesheet())
     try:
@@ -1127,6 +1337,4 @@ def main(argv: list[str] | None = None) -> None:
     except RuntimeError as exc:
         window = QMainWindow(); window.setCentralWidget(QLabel(str(exc))); window.resize(520, 180)
     window.show()
-    if options.update_health_file:
-        QTimer.singleShot(500, lambda: _write_update_health_file(options.update_health_file))
     raise SystemExit(app.exec())

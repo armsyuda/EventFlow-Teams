@@ -150,8 +150,37 @@ class WorkspaceDatabase(Database):
                 status TEXT NOT NULL DEFAULT 'OPEN',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS teams_v2_staff_members (
+                user_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT 'MEMBER',
+                job_title TEXT NOT NULL DEFAULT '',
+                color_hex TEXT NOT NULL DEFAULT '#A7D7F1',
+                status TEXT NOT NULL DEFAULT 'ACTIVE'
+            );
+            CREATE TABLE IF NOT EXISTS teams_v2_personal_schedules (
+                id TEXT PRIMARY KEY,
+                member_user_id TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                title TEXT NOT NULL,
+                private_content TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                can_edit INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS teams_v2_personal_schedules_dates_idx
+                ON teams_v2_personal_schedules(start_date,end_date);
+            CREATE TABLE IF NOT EXISTS teams_v2_my_task_priorities (
+                event_task_id TEXT PRIMARY KEY, sort_order INTEGER NOT NULL
+            );
             """
         )
+        task_columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(event_tasks)")}
+        if "assigned_member_user_id" not in task_columns:
+            self.conn.execute("ALTER TABLE event_tasks ADD COLUMN assigned_member_user_id TEXT")
+        schedule_columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(teams_v2_personal_schedules)")}
+        if "sort_order" not in schedule_columns:
+            self.conn.execute("ALTER TABLE teams_v2_personal_schedules ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
         self.conn.execute(
             "INSERT OR IGNORE INTO teams_v2_workspace(singleton,user_id,organization_id) VALUES (1,?,?)",
             (self.workspace_user_id, self.workspace_organization_id),

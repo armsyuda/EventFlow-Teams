@@ -4,12 +4,13 @@ import calendar
 from datetime import date
 
 from PySide6.QtCore import QDate, QEvent, QPoint, QTimer, Qt, Signal
-from PySide6.QtWidgets import QCalendarWidget, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSizePolicy, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCalendarWidget, QCheckBox, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSizePolicy, QSplitter, QVBoxLayout, QWidget
 
 from ..pdf_export import export_calendar_pdf
 from ..theme import status_color
 from .month_timeline import MonthTimeline
 from .pdf_export_dialog import configure_pdf_icon_button, export_calendar_pdf_from_page
+from .widgets import _DirectCalendarPopup
 
 
 CATEGORY_CARD_BORDERS = {
@@ -84,14 +85,10 @@ class CalendarTaskCard(QFrame):
         actions.addStretch(); layout.addLayout(actions)
 
     def _open_calendar(self, anchor):
-        calendar_popup = QCalendarWidget(self)
-        calendar_popup.setWindowFlags(Qt.WindowType.Popup)
-        calendar_popup.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
-        calendar_popup.setGridVisible(True)
-        calendar_popup.setMinimumDate(QDate.currentDate())
-        calendar_popup.setSelectedDate(QDate.fromString(self.task["due_date"], "yyyy-MM-dd"))
-        calendar_popup.setFixedSize(340, 270)
-        calendar_popup.clicked.connect(
+        calendar_popup = _DirectCalendarPopup(self)
+        calendar_popup.calendar.setMinimumDate(QDate.currentDate())
+        calendar_popup.set_selected_date(QDate.fromString(self.task["due_date"], "yyyy-MM-dd"))
+        calendar_popup.calendar.clicked.connect(
             lambda selected: (self.postpone_requested.emit(self.task_id, selected.toPython()), calendar_popup.close())
         )
         calendar_popup.move(anchor.mapToGlobal(anchor.rect().bottomLeft()))
@@ -99,8 +96,19 @@ class CalendarTaskCard(QFrame):
         self._calendar_popup = calendar_popup
 
 
+class PersonalScheduleCard(QFrame):
+    def __init__(self, schedule, parent=None):
+        super().__init__(parent); self.setObjectName("CalendarPersonalScheduleCard")
+        color = str(schedule.get("color_hex") or "#8AA6BF")
+        self.setStyleSheet(f"QFrame#CalendarPersonalScheduleCard{{background:transparent;border:2px solid {color};border-radius:10px;}}")
+        layout = QVBoxLayout(self); layout.setContentsMargins(9, 5, 9, 5); layout.setSpacing(1)
+        title = QLabel(f"{schedule.get('member_name','직원')} · {schedule.get('title','일정')}"); title.setObjectName("CalendarTaskName"); layout.addWidget(title)
+        period = QLabel(f"{schedule.get('start_date','')} ~ {schedule.get('end_date','')}"); period.setObjectName("Muted"); layout.addWidget(period)
+
+
 class CalendarPage(QWidget):
     changed = Signal(int)
+    personal_schedule_requested = Signal(object)
 
     def __init__(self, service, db=None, parent=None):
         super().__init__(parent)
@@ -114,6 +122,13 @@ class CalendarPage(QWidget):
         top.addStretch()
         self.toggle = QPushButton("일정 목록 숨기기"); self.toggle.clicked.connect(self._toggle_side)
         top.addWidget(self.toggle)
+        self.personal_button = QPushButton("+ 개인 일정")
+        self.personal_button.setProperty("primary", True); self.personal_button.setVisible(False)
+        self.personal_button.clicked.connect(lambda: self.personal_schedule_requested.emit(None))
+        top.addWidget(self.personal_button)
+        self.personal_overlay = QCheckBox("개인 일정 표시")
+        self.personal_overlay.setVisible(False); self.personal_overlay.toggled.connect(self.refresh)
+        top.addWidget(self.personal_overlay)
         self.export_button = QPushButton()
         configure_pdf_icon_button(self.export_button)
         self.export_button.setToolTip("달력 PDF로 내보내기")
@@ -155,6 +170,20 @@ class CalendarPage(QWidget):
         self.side.setVisible(visible); self.toggle.setText("일정 목록 숨기기" if visible else "일정 목록 보기")
         self._update_month_label()
         QTimer.singleShot(0, self._position_navigation)
+
+    def configure_personal_schedules(self, current_user_id: str, on_edit) -> None:
+        self._personal_user_id = current_user_id
+        self.personal_schedule_requested.connect(on_edit)
+        self.personal_button.setVisible(bool(current_user_id))
+        self.personal_overlay.setVisible(bool(current_user_id))
+
+    def _personal_schedules(self):
+        try:
+            rows = self.db.query("""SELECT s.*,m.display_name member_name,m.color_hex FROM teams_v2_personal_schedules s
+                LEFT JOIN teams_v2_staff_members m ON m.user_id=s.member_user_id ORDER BY s.start_date,s.id""")
+        except Exception:
+            return []
+        return [dict(row) for row in rows]
 
     def set_event(self, event_id):
         self.event_id = event_id
@@ -218,7 +247,14 @@ class CalendarPage(QWidget):
     def refresh_periods(self):
         first = date(self.calendar.year, self.calendar.month, 1)
         last = date(self.calendar.year, self.calendar.month, calendar.monthrange(self.calendar.year, self.calendar.month)[1])
-        self.calendar.set_tasks(self.service.calendar_range(first, last, self.event_id) if self.event_id else [])
+        tasks = self.service.calendar_range(first, last, self.event_id) if self.event_id else []
+        try:
+            colors = {row["user_id"]: row["color_hex"] for row in self.db.query("SELECT user_id,color_hex FROM teams_v2_staff_members")}
+            for task in tasks: task["member_color_hex"] = colors.get(task["assigned_member_user_id"])
+        except Exception:
+            pass
+        self.calendar.set_tasks(tasks)
+        self.calendar.set_personal_schedules(self._personal_schedules() if self.personal_overlay.isChecked() else [])
         event = self.service.get_event(self.event_id) if self.event_id else None
         self.calendar.set_event_period(event if event and event["start_date"] and event["end_date"] else None)
 
@@ -226,8 +262,9 @@ class CalendarPage(QWidget):
         selected = selected or self.calendar.selected
         self.selected_title.setText(f"{selected.year:04d}년 {selected.month:02d}월 {selected.day:02d}일"); self.list.clear()
         tasks = self.service.calendar_tasks(selected, self.event_id) if self.event_id else []
-        self.selected_count.setText(f"{len(tasks)}개")
-        if not tasks:
+        schedules = [row for row in self._personal_schedules() if row["start_date"] <= selected.isoformat() <= row["end_date"]] if self.personal_overlay.isChecked() else []
+        self.selected_count.setText(f"{len(tasks) + len(schedules)}개")
+        if not tasks and not schedules:
             self.list.hide(); self.empty.show(); return
         self.empty.hide(); self.list.show()
         for task in tasks:
@@ -237,6 +274,9 @@ class CalendarPage(QWidget):
             card.completion_requested.connect(self._set_completed)
             card.postpone_requested.connect(self._postpone)
             self.list.setItemWidget(item, card)
+        for schedule in schedules:
+            item = QListWidgetItem(); item.setSizeHint(item.sizeHint().__class__(0, 54)); self.list.addItem(item)
+            self.list.setItemWidget(item, PersonalScheduleCard(schedule, self.list))
 
     def _set_completed(self, task_id: int, completed: bool):
         self.service.set_completed(task_id, completed)

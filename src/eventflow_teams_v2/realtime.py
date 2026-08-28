@@ -20,14 +20,13 @@ class RealtimeSignalClient(QThread):
     changed = Signal()
     state_changed = Signal(str, str)
 
-    def __init__(self, supabase_url: str, publishable_key: str, access_token: str, organization_id: str, table: str = "teams_v2_sync_signals", field: str = "organization_id") -> None:
+    def __init__(self, supabase_url: str, publishable_key: str, access_token: str, organization_id: str) -> None:
         super().__init__()
         base = supabase_url.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
         self.url = f"{base}/realtime/v1/websocket?apikey={quote(publishable_key)}&vsn=1.0.0"
         self.access_token = access_token
         self.organization_id = organization_id
-        self.table = table; self.field = field
-        self.topic = f"realtime:teams-v2-{organization_id}" if table == "teams_v2_sync_signals" else f"realtime:teams-v2-{table}-{organization_id}"
+        self.topic = f"realtime:teams-v2-{organization_id}"
         self._stopping = threading.Event()
         self._socket: websocket.WebSocket | None = None
 
@@ -62,8 +61,8 @@ class RealtimeSignalClient(QThread):
                 "postgres_changes": [{
                     # The first change for an organization creates the pulse
                     # row, while later changes update it.  Subscribe to both.
-                    "event": "*", "schema": "public", "table": self.table,
-                    "filter": f"{self.field}=eq.{self.organization_id}",
+                    "event": "*", "schema": "public", "table": "teams_v2_sync_signals",
+                    "filter": f"organization_id=eq.{self.organization_id}",
                 }],
             },
             "access_token": self.access_token,

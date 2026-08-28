@@ -122,3 +122,17 @@ def test_changes_merge_task_and_delete_link_without_outbox_echo(tmp_path: Path) 
     assert database.one("SELECT remote_cursor FROM teams_v2_workspace WHERE singleton=1")["remote_cursor"] == "4"
     assert database.pending_outbox() == []
     database.close()
+
+
+def test_snapshot_mirrors_staff_and_private_schedule_content(tmp_path: Path) -> None:
+    database = WorkspaceDatabase(workspace_database_path(tmp_path, "user-a", "org-a"), user_id="user-a", organization_id="org-a")
+    WorkspaceSnapshotStore(database).apply_snapshot({
+        "cursor": 2, "events": [], "event_tasks": [], "vendors": [], "people": [], "master_items": [], "event_vendors": [], "event_freelancers": [],
+        "staff_members": [{"user_id": "staff-1", "display_name": "직원", "role": "MEMBER", "job_title": "기획", "color_hex": "#A9D9F5", "status": "ACTIVE"}],
+        "personal_schedules": [{"id": "schedule-1", "member_user_id": "staff-1", "start_date": "2026-08-25", "end_date": "2026-08-26", "title": "휴가", "private_content": "상세", "can_edit": True}],
+    })
+    member = database.one("SELECT display_name,color_hex FROM teams_v2_staff_members WHERE user_id='staff-1'")
+    schedule = database.one("SELECT title,private_content,can_edit FROM teams_v2_personal_schedules WHERE id='schedule-1'")
+    assert member["display_name"] == "직원" and member["color_hex"] == "#A9D9F5"
+    assert schedule["title"] == "휴가" and schedule["private_content"] == "상세" and schedule["can_edit"] == 1
+    database.close()

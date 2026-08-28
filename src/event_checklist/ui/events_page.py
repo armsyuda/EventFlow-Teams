@@ -43,6 +43,8 @@ class EventsPage(QWidget):
         self.event_id: int | None = None
         self.loading = False
         self._loaded_event_id: int | None = None
+        self._staff_assignment_handler = None
+        self._finance_entry_handler = None
         self._current_tasks = []
         self._freelancer_ids: set[int] = set()
         self._hide_vendor_ids: set[int] = set()
@@ -124,6 +126,10 @@ class EventsPage(QWidget):
         self.removed_toggle.setProperty("quiet", True)
         self.removed_toggle.toggled.connect(self._removed_view_toggled)
         actions.addWidget(self.removed_toggle)
+        self.finance_button = QPushButton("선택 업무 실제 정산 만들기")
+        self.finance_button.setProperty("quiet", True)
+        self.finance_button.clicked.connect(self.create_finance_from_selected)
+        actions.addWidget(self.finance_button)
         self.pdf_button = QPushButton()
         self.pdf_button.setProperty("checklistAction", True)
         configure_pdf_icon_button(self.pdf_button, size=44)
@@ -155,6 +161,22 @@ class EventsPage(QWidget):
         self.table.enable_row_drag(self._handle_row_drag)
         self.table.enable_major_float(1)  # 대분류가 화면 밖으로 벗어나도 이름을 상단에 고정 표시
         root.addWidget(self.table, 1)
+
+    def set_staff_assignment_handler(self, handler) -> None:
+        self._staff_assignment_handler = handler
+
+    def set_finance_entry_handler(self, handler) -> None:
+        """Connect the optional V3 actual-finance flow without changing V2 estimates."""
+        self._finance_entry_handler = handler
+
+    def create_finance_from_selected(self) -> None:
+        ids = self._selected_task_ids()
+        if not ids:
+            QMessageBox.information(self, "실제 정산", "정산으로 만들 업무 행을 먼저 선택하세요.")
+            return
+        task = next((item for item in self._current_tasks if int(item["id"]) == ids[0]), None)
+        if task and self._finance_entry_handler:
+            self._finance_entry_handler(dict(task))
 
     def set_event(self, event_id: int | None, *, force: bool = False):
         if not force and self._loaded_event_id == event_id:
@@ -372,11 +394,17 @@ class EventsPage(QWidget):
                 (self._assignee_label(x) for x in all_assignees if x["id"] == task["assignee_id"]),
                 "미지정",
             )
-            pm_name = next((x["name"] for x in pm_assignees if x["id"] == task["pm_assignee_id"]), "미지정")
+            # Local baseline databases predate the Teams-only column.  Treat a
+            # missing assignment as unassigned instead of making ordinary
+            # Local checklist rendering depend on the V2 workspace schema.
+            assigned_member_user_id = task.get("assigned_member_user_id")
+            staff_member = self.db.one("SELECT display_name,job_title FROM teams_v2_staff_members WHERE user_id=?", (assigned_member_user_id,)) if assigned_member_user_id else None
+            legacy_pm_name = next((self._assignee_label(x) for x in all_assignees if x["id"] == task["pm_assignee_id"]), "미지정")
+            pm_name = (f"● {staff_member['display_name']}" + (f" · {staff_member['job_title']}" if staff_member['job_title'] else "")) if staff_member else legacy_pm_name
             for column, text, data in [
                 (8, task["planned_start"] or "미입력", task["planned_start"]),
                 (9, task["due_date"] or "미입력", task["due_date"]),
-                (10, pm_name, task["pm_assignee_id"]),
+                (10, pm_name, assigned_member_user_id),
             ]:
                 cell = QTableWidgetItem(text); cell.setData(Qt.ItemDataRole.UserRole, task_id)
                 cell.setData(int(Qt.ItemDataRole.UserRole) + 1, data); cell.setFlags(cell.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -639,9 +667,20 @@ class EventsPage(QWidget):
             self.table.open_date_editor(row, column, task[field],
                                         lambda value: self._commit_date(row, task, column, field, value))
         elif column == 10:
-            choices = [("미지정", None)] + [(x["name"], x["id"]) for x in self._pm_assignees]
-            self.table.open_choice_editor(row, column, choices, task["pm_assignee_id"],
-                                          lambda value: self._commit_simple(row, task, column, "pm_assignee_id", value, choices))
+            has_staff_table = bool(self.db.one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='teams_v2_staff_members'"))
+            staff = self.db.query("SELECT user_id,display_name,job_title FROM teams_v2_staff_members WHERE status='ACTIVE' ORDER BY display_name,user_id") if has_staff_table else []
+            def staff_label(item):
+                name = str(item["display_name"] or "").strip()
+                if not name or name == "직원": name = f"직원 {str(item['user_id'])[:6]}"
+                return f"● {name}" + (f" · {item['job_title']}" if item['job_title'] else "")
+            if staff:
+                choices = [("미지정", None)] + [(staff_label(item), item["user_id"]) for item in staff]
+                self.table.open_choice_editor(row, column, choices, task.get("assigned_member_user_id"),
+                                              lambda value: self._commit_member_assignment(row, task, value, choices))
+            else:
+                choices = [("미지정", None)] + [(self._assignee_label(item), item["id"]) for item in self._pm_assignees]
+                self.table.open_choice_editor(row, column, choices, task["pm_assignee_id"],
+                                              lambda value: self._commit_pm_assignee(row, task, value, choices))
         elif column == 11:
             # 업체 콤보: 프리랜서 그룹을 맨 위(미지정 다음)에 두고 그 뒤에 업체를 나열한다.
             choices = [("미지정", None), ("프리랜서", FREELANCER_KEY)] + [(x["name"], x["id"]) for x in self._vendors]
@@ -695,6 +734,19 @@ class EventsPage(QWidget):
         text = next((label for label, data in choices if data == value), "미지정")
         cell = self.table.item(row, column); cell.setText(text); cell.setData(int(Qt.ItemDataRole.UserRole) + 1, value)
         self.changed.emit(self.event_id or 0)
+
+    def _commit_member_assignment(self, row, task, value, choices):
+        if self._staff_assignment_handler:
+            if not self._staff_assignment_handler(task, value):
+                return False
+        else:
+            self.db.execute("UPDATE event_tasks SET assigned_member_user_id=? WHERE id=?", (value, int(task["id"])))
+        task["assigned_member_user_id"] = value
+        cell = self.table.item(row, 10)
+        cell.setText(next((label for label, data in choices if data == value), "미지정"))
+        cell.setData(int(Qt.ItemDataRole.UserRole) + 1, value)
+        self.changed.emit(self.event_id or 0)
+        return True
 
     def _commit_status(self, row, task, value):
         self.service.update_task(int(task["id"]), status=value); task["status"] = value

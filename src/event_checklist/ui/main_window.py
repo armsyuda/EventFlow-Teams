@@ -85,8 +85,6 @@ class MainWindow(QMainWindow):
         self.update_download_thread = None
         self.update_progress = None
         self.update_in_progress = False
-        self.db.add_history_listener(self._update_history_buttons)
-        self._update_history_buttons(self.db.can_undo, self.db.can_redo)
         self.undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
         self.undo_shortcut.activated.connect(self.undo_last_change)
         self.redo_shortcut = QShortcut(QKeySequence.StandardKey.Redo, self)
@@ -109,44 +107,68 @@ class MainWindow(QMainWindow):
     def _build_sidebar(self):
         sidebar = QFrame(); sidebar.setObjectName("Sidebar"); sidebar.setFixedWidth(212)
         layout = QVBoxLayout(sidebar); layout.setContentsMargins(16, 20, 16, 20); layout.setSpacing(8)
+        self._sidebar_layout = layout
         title = QLabel("이플"); title.setObjectName("AppTitle")
         subtitle = QLabel("이벤트 플로우"); subtitle.setObjectName("Muted"); subtitle.setContentsMargins(8, 0, 0, 18)
         layout.addWidget(title); layout.addWidget(subtitle)
         names = ["대시보드", "체크리스트", "달력", "정산내역", "설정"]
         self.nav_group = QButtonGroup(sidebar); self.nav_group.setExclusive(True); self.nav_buttons = []
+        self.global_menu = QWidget(sidebar); self.global_menu.setObjectName("SidebarGlobalMenu")
+        self.global_menu_layout = QVBoxLayout(self.global_menu); self.global_menu_layout.setContentsMargins(0, 0, 0, 0); self.global_menu_layout.setSpacing(8)
+        layout.addWidget(self.global_menu)
+        self.global_separator = QFrame(); self.global_separator.setFrameShape(QFrame.Shape.HLine); self.global_separator.setObjectName("SidebarSeparator"); layout.addWidget(self.global_separator)
+        self.project_menu = QWidget(sidebar); self.project_menu.setObjectName("SidebarProjectMenu")
+        self.project_menu_layout = QVBoxLayout(self.project_menu); self.project_menu_layout.setContentsMargins(0, 0, 0, 0); self.project_menu_layout.setSpacing(8)
         for index, name in enumerate(names[:4]):
             button = QPushButton(name); button.setCheckable(True); button.setProperty("nav", True)
             button.clicked.connect(lambda _checked=False, value=index: self._navigate(value))
-            self.nav_group.addButton(button, index); self.nav_buttons.append(button); layout.addWidget(button)
+            self.nav_group.addButton(button, index); self.nav_buttons.append(button); self.project_menu_layout.addWidget(button)
+        layout.addWidget(self.project_menu)
+        self.project_separator = QFrame(); self.project_separator.setFrameShape(QFrame.Shape.HLine); self.project_separator.setObjectName("SidebarSeparator"); layout.addWidget(self.project_separator)
         layout.addStretch()
-        version = QLabel(f"이벤트 플로우 {__version__}"); version.setObjectName("Muted")
-        version.setAlignment(Qt.AlignmentFlag.AlignCenter); layout.addWidget(version)
-        separator = QFrame(); separator.setFrameShape(QFrame.Shape.HLine); separator.setObjectName("SidebarSeparator")
-        layout.addWidget(separator)
-        history_row = QHBoxLayout(); history_row.setSpacing(8)
-        self.undo_button = QPushButton("↶"); self.undo_button.setObjectName("HistoryButton")
-        self.undo_button.setToolTip("되돌리기 · 최대 50단계 (Ctrl+Z)")
-        self.undo_button.setAccessibleName("되돌리기")
-        self.undo_button.clicked.connect(self.undo_last_change)
-        self.redo_button = QPushButton("↷"); self.redo_button.setObjectName("HistoryButton")
-        self.redo_button.setToolTip("앞으로 되돌리기 (Ctrl+Y)")
-        self.redo_button.setAccessibleName("앞으로 되돌리기")
-        self.redo_button.clicked.connect(self.redo_last_change)
-        history_row.addWidget(self.undo_button); history_row.addWidget(self.redo_button)
-        layout.addLayout(history_row)
+        self.company_menu = QWidget(sidebar); self.company_menu.setObjectName("SidebarCompanyMenu")
+        self.company_menu_layout = QVBoxLayout(self.company_menu); self.company_menu_layout.setContentsMargins(0, 0, 0, 0); self.company_menu_layout.setSpacing(8)
         self.save_button = QPushButton("저장")
         self.save_button.setObjectName("SidebarSaveButton")
         self.save_button.setToolTip("현재 전체 데이터를 복구용 저장본으로 보관")
         self.save_button.clicked.connect(self.save_full_backup)
-        layout.addWidget(self.save_button)
+        self.company_menu_layout.addWidget(self.save_button)
         settings = QPushButton(names[4]); settings.setCheckable(True); settings.setProperty("nav", True)
         settings.clicked.connect(lambda _checked=False: self._navigate(4))
-        self.nav_group.addButton(settings, 4); self.nav_buttons.append(settings); layout.addWidget(settings)
+        self.nav_group.addButton(settings, 4); self.nav_buttons.append(settings); self.company_menu_layout.addWidget(settings)
+        layout.addWidget(self.company_menu)
         return sidebar
 
-    def _update_history_buttons(self, can_undo: bool, can_redo: bool) -> None:
-        self.undo_button.setEnabled(can_undo)
-        self.redo_button.setEnabled(can_redo)
+    def install_teams_staff_page(self, page) -> None:
+        """Append a V2-only company work board without changing Local routes."""
+        if hasattr(self, "staff_work_page"):
+            return
+        self.staff_work_page = page
+        index = self.stack.count()
+        self.stack.addWidget(page)
+        button = QPushButton("직원업무"); button.setCheckable(True); button.setProperty("nav", True)
+        button.clicked.connect(lambda _checked=False, value=index: self._navigate(value))
+        self.nav_group.addButton(button, index); self.nav_buttons.append(button)
+        self.global_menu_layout.addWidget(button)
+
+    def add_company_global_nav_button(self, button: QPushButton) -> None:
+        """Place company-wide routes above project routes and keep one active route."""
+        button.setCheckable(True); button.setProperty("nav", True)
+        self.nav_group.addButton(button)
+        self.global_menu_layout.addWidget(button)
+
+    def add_company_management_nav_button(self, button: QPushButton) -> None:
+        """Company administration remains the last navigation control."""
+        button.setCheckable(True); button.setProperty("nav", True)
+        self.nav_group.addButton(button)
+        self.company_menu_layout.addWidget(button)
+
+    def open_teams_task(self, task_id: int) -> None:
+        row = self.db.one("SELECT event_id FROM event_tasks WHERE id=?", (task_id,))
+        if not row:
+            return
+        self.select_event(int(row["event_id"]))
+        self.nav_buttons[1].click()
 
     def save_full_backup(self) -> None:
         try:
@@ -208,6 +230,7 @@ class MainWindow(QMainWindow):
         elif index == 2: self.calendar.set_event(self.selected_event_id)
         elif index == 3: self.settlement.set_event(self.selected_event_id)
         elif index == 4: self.settings.refresh()
+        elif hasattr(self, "staff_work_page") and self.stack.widget(index) is self.staff_work_page: self.staff_work_page.refresh()
 
     def select_event(self, event_id: int | None):
         event = self.service.get_event(event_id) if event_id else None
@@ -338,7 +361,7 @@ class MainWindow(QMainWindow):
         if not info.asset_url:
             message = (
                 f"새 버전 {info.version}은 공개되어 있지만 자동 업데이트를 설치할 수 없습니다.\n\n"
-                "확인된 원인\nGitHub Release에 EventFlowTeams-Windows.zip 파일이 없습니다.\n\n"
+                "확인된 원인\nGitHub Release에 EventFlow-Windows.zip 파일이 없습니다.\n\n"
                 "확인 방법\n해당 Release에 Windows ZIP 파일을 첨부한 뒤 다시 확인하세요.\n\n"
                 f"Release 주소: {info.release_url}"
             )

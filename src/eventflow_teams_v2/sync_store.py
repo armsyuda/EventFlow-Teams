@@ -56,6 +56,9 @@ class WorkspaceSnapshotStore:
         people = _items(snapshot.get("people"))
         master_items = _items(snapshot.get("master_items"))
         tasks = _items(snapshot.get("event_tasks"))
+        staff = _items(snapshot.get("staff_members"))
+        schedules = _items(snapshot.get("personal_schedules"))
+        priorities = _items(snapshot.get("my_task_priorities"))
         with self.db.applying_remote_changes():
             conn = self.db.conn
             conn.execute("DELETE FROM event_vendors")
@@ -66,6 +69,23 @@ class WorkspaceSnapshotStore:
             conn.execute("DELETE FROM contacts")
             conn.execute("DELETE FROM teams_v2_entity_map")
             conn.execute("DELETE FROM teams_v2_tombstones")
+            conn.execute("DELETE FROM teams_v2_staff_members")
+            conn.execute("DELETE FROM teams_v2_personal_schedules")
+            conn.execute("DELETE FROM teams_v2_my_task_priorities")
+
+            for member in staff:
+                conn.execute(
+                    "INSERT INTO teams_v2_staff_members(user_id,display_name,role,job_title,color_hex,status) VALUES (?,?,?,?,?,?)",
+                    (str(member.get("user_id") or ""), str(member.get("display_name") or "직원"), str(member.get("role") or "MEMBER"), str(member.get("job_title") or ""), str(member.get("color_hex") or "#A7D7F1"), str(member.get("status") or "ACTIVE")),
+                )
+            for schedule in schedules:
+                conn.execute(
+                    "INSERT INTO teams_v2_personal_schedules(id,member_user_id,start_date,end_date,title,private_content,sort_order,can_edit) VALUES (?,?,?,?,?,?,?,?)",
+                    (str(schedule.get("id") or ""), str(schedule.get("member_user_id") or ""), str(schedule.get("start_date") or ""), str(schedule.get("end_date") or ""), str(schedule.get("title") or ""), str(schedule.get("private_content") or ""), int(schedule.get("sort_order") or 0), 1 if schedule.get("can_edit") else 0),
+                )
+            for priority in priorities:
+                if priority.get("event_task_id"):
+                    conn.execute("INSERT INTO teams_v2_my_task_priorities(event_task_id,sort_order) VALUES (?,?)", (str(priority["event_task_id"]), int(priority.get("sort_order") or 0)))
 
             for vendor in vendors:
                 cursor = conn.execute(
@@ -95,9 +115,9 @@ class WorkspaceSnapshotStore:
                 self._map("EVENT", int(cursor.lastrowid), str(event["id"]), updated_at=str(event.get("updated_at") or ""))
             for task in tasks:
                 cursor = conn.execute(
-                    "INSERT INTO event_tasks(event_id,master_item_id,major,minor,name,detail,required,status,priority,quantity,unit,assignee_id,pm_assignee_id,vendor_id,planned_start,due_date,unit_price,vat_type,is_removed,removed_reason,note,completed_at,sort_order) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (self._local_id("EVENT", task.get("event_id")), self._local_id("MASTER_ITEM", task.get("master_item_id")), str(task.get("major") or "기본"), str(task.get("minor") or "기타"), str(task.get("name") or "항목"), str(task.get("detail") or ""), 1 if task.get("required", True) else 0, str(task.get("status") or "미착수"), _priority(task.get("priority")), task.get("quantity"), str(task.get("unit") or ""), self._local_id("PERSON", task.get("assignee_id")), self._local_id("PERSON", task.get("pm_assignee_id")), self._local_id("VENDOR", task.get("vendor_id")), task.get("planned_start"), task.get("due_date"), task.get("unit_price"), str(task.get("vat_type") or "TAXABLE"), 1 if task.get("is_removed", False) else 0, str(task.get("removed_reason") or ""), str(task.get("note") or ""), task.get("completed_at"), int(task.get("sort_order") or 0)),
+                    "INSERT INTO event_tasks(event_id,master_item_id,major,minor,name,detail,required,status,priority,quantity,unit,assignee_id,pm_assignee_id,vendor_id,planned_start,due_date,unit_price,vat_type,is_removed,removed_reason,note,completed_at,sort_order,assigned_member_user_id) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (self._local_id("EVENT", task.get("event_id")), self._local_id("MASTER_ITEM", task.get("master_item_id")), str(task.get("major") or "기본"), str(task.get("minor") or "기타"), str(task.get("name") or "항목"), str(task.get("detail") or ""), 1 if task.get("required", True) else 0, str(task.get("status") or "미착수"), _priority(task.get("priority")), task.get("quantity"), str(task.get("unit") or ""), self._local_id("PERSON", task.get("assignee_id")), self._local_id("PERSON", task.get("pm_assignee_id")), self._local_id("VENDOR", task.get("vendor_id")), task.get("planned_start"), task.get("due_date"), task.get("unit_price"), str(task.get("vat_type") or "TAXABLE"), 1 if task.get("is_removed", False) else 0, str(task.get("removed_reason") or ""), str(task.get("note") or ""), task.get("completed_at"), int(task.get("sort_order") or 0), task.get("assigned_member_user_id")),
                 )
                 self._map("EVENT_TASK", int(cursor.lastrowid), str(task["id"]), int(task.get("row_version") or 0), str(task.get("updated_at") or ""))
             self._apply_links(_items(snapshot.get("event_vendors")), "event_vendors", "vendor_id", "VENDOR")
@@ -106,6 +126,16 @@ class WorkspaceSnapshotStore:
                 "UPDATE teams_v2_workspace SET remote_cursor=?, last_sync_at=CURRENT_TIMESTAMP, sync_state='SYNCED' WHERE singleton=1",
                 (str(snapshot.get("cursor") or "0"),),
             )
+
+    def replace_staff_members(self, members: list[dict[str, Any]]) -> None:
+        """Refresh only directory labels without overwriting cached work or its outbox."""
+        with self.db.applying_remote_changes():
+            self.db.conn.execute("DELETE FROM teams_v2_staff_members")
+            for member in members:
+                self.db.conn.execute(
+                    "INSERT INTO teams_v2_staff_members(user_id,display_name,role,job_title,color_hex,status) VALUES (?,?,?,?,?,?)",
+                    (str(member.get("user_id") or ""), str(member.get("display_name") or ""), str(member.get("role") or "MEMBER"), str(member.get("job_title") or ""), str(member.get("color_hex") or "#A7D7F1"), str(member.get("status") or "ACTIVE")),
+                )
 
     def apply_changes(self, response: dict[str, Any]) -> int:
         """Merge a server changes response without replacing the Local workspace.
@@ -128,6 +158,8 @@ class WorkspaceSnapshotStore:
                 elif entity_type == "MASTER_ITEM": self._upsert_master(payload)
                 elif entity_type == "EVENT": self._upsert_event(payload)
                 elif entity_type == "EVENT_TASK": self._upsert_task(payload)
+                elif entity_type == "ORGANIZATION_MEMBER": self._upsert_staff_member(payload)
+                elif entity_type == "PERSONAL_SCHEDULE": self._upsert_personal_schedule(payload)
                 elif entity_type == "EVENT_VENDOR": self._upsert_link(payload, "event_vendors", "vendor_id", "VENDOR")
                 elif entity_type == "EVENT_FREELANCER": self._upsert_link(payload, "event_freelancers", "person_id", "PERSON")
             self.db.conn.execute(
@@ -150,6 +182,9 @@ class WorkspaceSnapshotStore:
             event_id = self._local_id("EVENT", payload.get("event_id")); person_id = self._local_id("PERSON", payload.get("person_id"))
             if event_id is not None and person_id is not None: self.db.conn.execute("DELETE FROM event_freelancers WHERE event_id=? AND person_id=?", (event_id, person_id))
             return
+        if entity_type == "PERSONAL_SCHEDULE":
+            self.db.conn.execute("DELETE FROM teams_v2_personal_schedules WHERE id=?", (remote_id,))
+            return
         local_id = self._mapped_local(entity_type, remote_id)
         tables = {"VENDOR": "contacts", "PERSON": "contacts", "MASTER_ITEM": "master_items", "EVENT": "events", "EVENT_TASK": "event_tasks"}
         if local_id is not None and entity_type in tables:
@@ -166,6 +201,30 @@ class WorkspaceSnapshotStore:
             cursor = self.db.conn.execute("INSERT INTO contacts(kind,name,phone,job_title,role_note) VALUES ('VENDOR',?,?,?,?)", (values[0], "", values[1], "")); local_id = int(cursor.lastrowid)
         else: self.db.conn.execute("UPDATE contacts SET name=?,job_title=? WHERE id=?", values)
         self._map("VENDOR", local_id, remote_id, updated_at=str(item.get("updated_at") or ""))
+
+    def _upsert_staff_member(self, item: dict[str, Any]) -> None:
+        user_id = str(item.get("user_id") or "")
+        if not user_id:
+            return
+        # A membership change does not contain the profile name.  Preserve the
+        # existing cached name until the next complete snapshot refresh.
+        current = self.db.one("SELECT display_name FROM teams_v2_staff_members WHERE user_id=?", (user_id,))
+        display_name = str(current["display_name"]) if current else "직원"
+        self.db.conn.execute(
+            "INSERT INTO teams_v2_staff_members(user_id,display_name,role,job_title,color_hex,status) VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(user_id) DO UPDATE SET role=excluded.role,job_title=excluded.job_title,color_hex=excluded.color_hex,status=excluded.status",
+            (user_id, display_name, str(item.get("role") or "MEMBER"), str(item.get("job_title") or ""), str(item.get("color_hex") or "#A7D7F1"), str(item.get("status") or "ACTIVE")),
+        )
+
+    def _upsert_personal_schedule(self, item: dict[str, Any]) -> None:
+        schedule_id = str(item.get("id") or "")
+        if not schedule_id:
+            return
+        self.db.conn.execute(
+            "INSERT INTO teams_v2_personal_schedules(id,member_user_id,start_date,end_date,title,private_content,sort_order,can_edit) VALUES (?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET member_user_id=excluded.member_user_id,start_date=excluded.start_date,end_date=excluded.end_date,title=excluded.title,private_content=excluded.private_content,sort_order=excluded.sort_order,can_edit=excluded.can_edit",
+            (schedule_id, str(item.get("member_user_id") or ""), str(item.get("start_date") or ""), str(item.get("end_date") or ""), str(item.get("title") or ""), str(item.get("private_content") or ""), int(item.get("sort_order") or 0), 1 if item.get("can_edit") else 0),
+        )
 
     def _upsert_person(self, item: dict[str, Any]) -> None:
         remote_id = str(item.get("id") or "")

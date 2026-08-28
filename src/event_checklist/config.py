@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 
 
-APP_NAME = "EventFlowTeams"
-PRODUCT_NAME = "EventFlow Teams"
+APP_NAME = "EventCheckList"
+PRODUCT_NAME = "EventFlow"
 
 
 def data_root() -> Path:
