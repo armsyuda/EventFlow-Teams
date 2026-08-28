@@ -40,3 +40,8 @@
 
 - 사용자 승인 후 커밋 `270ced8`과 태그 `v0.3.60`을 공개했다. GitHub Actions Windows release 실행 `33146356966`이 테스트, Inno 설치 파일, 자동 업데이트 ZIP, SHA-256 목록 생성 및 GitHub Release 게시를 모두 성공했다.
 - 공개 Release에는 `EventFlowTeams-Setup.exe`, 버전 설치 파일, `EventFlowTeams-Windows.zip`, `SHA256SUMS.txt`가 있다. Teams 앱의 최신 Release 조회는 `0.3.60`과 자동 업데이트 ZIP을 정상 인식했다. 이미 설치된 앱은 다음 실행 시 새 버전을 알리고, 업데이트를 누르면 다운로드·검증·교체·재시작한다.
+
+## 2026-08-28 TLS 인증서 경로 수정
+
+- 일부 PC의 기존 `REQUESTS_CA_BUNDLE` 환경값이 삭제된 사용자 폴더를 가리켜 회사 목록 조회가 실패했다. PyInstaller runtime hook이 앱에 포함된 `certifi/cacert.pem`을 `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `SSL_CERT_FILE`에 명시적으로 설정하도록 수정했다.
+- 오래된 외부 인증서 경로를 넣은 패키지 실행 환경 시뮬레이션에서 앱 내부 인증서 파일로 교체되는 것을 확인했다. 38개 Teams 테스트와 compileall도 통과했다. 다음 공개 버전은 `0.3.61`이다.
