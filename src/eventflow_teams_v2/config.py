@@ -33,4 +33,4 @@ class TeamsV2Config:
         if not url or not key or "YOUR_PROJECT" in url or "REPLACE_ME" in key:
             raise RuntimeError("EVENTFLOW_SUPABASE_URL과 EVENTFLOW_SUPABASE_PUBLISHABLE_KEY를 설정해 주세요.")
         local_app_data = Path(getenv("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-        return cls(url, key, local_app_data / "EventFlowTeamsV2")
+        return cls(url, key, local_app_data / "EventFlowTeams")
