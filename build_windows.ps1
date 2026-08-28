@@ -14,7 +14,7 @@ if (Test-Path -LiteralPath $releaseExe) {
 
 Push-Location $root
 try {
-  & $python -m PyInstaller --noconfirm --clean --windowed --name $outputName --distpath $releaseRoot --workpath build `
+  & $python -m PyInstaller --noconfirm --clean --windowed --name $outputName --icon 'src\event_checklist\resources\assets\event_flow.ico' --distpath $releaseRoot --workpath build `
     --collect-all reportlab --collect-all keyring --collect-all websocket `
     --add-data 'src\event_checklist\resources;event_checklist\resources' --paths src eventflow_teams_v2_entry.py
   if ($LASTEXITCODE -ne 0) { throw 'Teams V2 실행 파일 빌드에 실패했습니다.' }

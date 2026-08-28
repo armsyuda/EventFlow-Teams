@@ -28,15 +28,12 @@ RestartApplications=no
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
-[Tasks]
-Name: "desktopicon"; Description: "바탕 화면에 바로가기 만들기"; GroupDescription: "추가 바로가기:"; Flags: unchecked
-
 [Files]
 Source: "..\release\EventFlowTeams\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "EventFlow Teams 실행"; Flags: nowait postinstall skipifsilent
