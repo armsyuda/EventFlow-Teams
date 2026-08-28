@@ -45,3 +45,4 @@
 
 - 일부 PC의 기존 `REQUESTS_CA_BUNDLE` 환경값이 삭제된 사용자 폴더를 가리켜 회사 목록 조회가 실패했다. PyInstaller runtime hook이 앱에 포함된 `certifi/cacert.pem`을 `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `SSL_CERT_FILE`에 명시적으로 설정하도록 수정했다.
 - 오래된 외부 인증서 경로를 넣은 패키지 실행 환경 시뮬레이션에서 앱 내부 인증서 파일로 교체되는 것을 확인했다. 38개 Teams 테스트와 compileall도 통과했다. 다음 공개 버전은 `0.3.61`이다.
+- `v0.3.61`은 공개 배포되었고, GitHub Actions 실행 `33146777901`이 설치 파일·자동 업데이트 ZIP·SHA-256 목록 게시까지 성공했다. 최신 Release 조회도 `0.3.60` 설치본에서 업데이트 대상으로 정상 인식한다.
