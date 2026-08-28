@@ -254,7 +254,7 @@ class CompanyCalendarPage(QWidget):
         self.timeline.set_personal_schedules(schedules, priority_member_user_id=current_member_id); self.timeline.set_event_period(None); self._selected(self.timeline.selected)
 
     def _selected(self, selected: date) -> None:
-        self.selected_title.setText(f"{selected:%Y년 %m월 %d일}"); self.list.clear(); selected_iso = selected.isoformat(); count = 0
+        self.selected_title.setText(f"{selected.year}년 {selected.month:02d}월 {selected.day:02d}일"); self.list.clear(); selected_iso = selected.isoformat(); count = 0
         for task in self.timeline.tasks:
             if str(task["planned_start"]) <= selected_iso <= str(task["due_date"]):
                 item = QListWidgetItem(); item.setSizeHint(item.sizeHint().__class__(0, 72)); self.list.addItem(item); self.list.setItemWidget(item, self._task_card(dict(task))); count += 1

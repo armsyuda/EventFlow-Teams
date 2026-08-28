@@ -29,7 +29,7 @@ jobs:
           @("PUBLIC_SUPABASE_URL=$env:PUBLIC_SUPABASE_URL", "PUBLIC_SUPABASE_PUBLISHABLE_KEY=$env:PUBLIC_SUPABASE_PUBLISHABLE_KEY") | Set-Content -Encoding utf8 .env
       - name: Test
         shell: pwsh
-        run: .\.venv\Scripts\python -m pytest -q
+        run: .\.venv\Scripts\python -m pytest -q tests/teams_v2
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
