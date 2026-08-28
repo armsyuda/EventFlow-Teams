@@ -18,14 +18,16 @@ from PySide6.QtCore import QThread, Signal
 
 class RealtimeSignalClient(QThread):
     changed = Signal()
+    access_changed = Signal()
     state_changed = Signal(str, str)
 
-    def __init__(self, supabase_url: str, publishable_key: str, access_token: str, organization_id: str) -> None:
+    def __init__(self, supabase_url: str, publishable_key: str, access_token: str, organization_id: str, user_id: str = "") -> None:
         super().__init__()
         base = supabase_url.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
         self.url = f"{base}/realtime/v1/websocket?apikey={quote(publishable_key)}&vsn=1.0.0"
         self.access_token = access_token
         self.organization_id = organization_id
+        self.user_id = user_id
         self.topic = f"realtime:teams-v2-{organization_id}"
         self._stopping = threading.Event()
         self._socket: websocket.WebSocket | None = None
@@ -63,6 +65,12 @@ class RealtimeSignalClient(QThread):
                     # row, while later changes update it.  Subscribe to both.
                     "event": "*", "schema": "public", "table": "teams_v2_sync_signals",
                     "filter": f"organization_id=eq.{self.organization_id}",
+                }, {
+                    # This is restricted by the server to the signed-in user.
+                    # It wakes the client when a manager changes this user's
+                    # role, status, or detailed permission overrides.
+                    "event": "*", "schema": "public", "table": "teams_v2_access_signals",
+                    "filter": f"user_id=eq.{self.user_id}",
                 }],
             },
             "access_token": self.access_token,
@@ -94,6 +102,11 @@ class RealtimeSignalClient(QThread):
             return
         event = message[3]
         if event == "postgres_changes":
-            self.changed.emit()
+            payload = message[4] if len(message) > 4 and isinstance(message[4], dict) else {}
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+            if data.get("table") == "teams_v2_access_signals":
+                self.access_changed.emit()
+            else:
+                self.changed.emit()
         elif event in {"phx_error", "phx_close"}:
             raise ConnectionError("Realtime channel closed")

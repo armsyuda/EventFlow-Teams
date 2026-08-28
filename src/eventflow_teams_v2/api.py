@@ -229,6 +229,24 @@ class TeamsV2Api:
     def save_member_permission_overrides(self, organization_id: str, user_id: str, overrides: list[dict[str, str]]) -> None:
         self.rpc("teams_v2_save_member_permission_overrides", {"target_organization_id": organization_id, "target_user_id": user_id, "requested_overrides": overrides}, "직원 메뉴 권한을 바꿀 수 없습니다.")
 
+    def save_company_member_access(self, organization_id: str, user_id: str, role: str, status: str, overrides: list[dict[str, str]]) -> None:
+        """Save a member's complete access decision atomically and notify them."""
+        self.rpc(
+            "teams_v2_save_company_member_access",
+            {
+                "target_organization_id": organization_id,
+                "target_user_id": user_id,
+                "target_role": role,
+                "target_status": status,
+                "requested_overrides": overrides,
+            },
+            "직원 권한을 저장할 수 없습니다.",
+        )
+
+    def pop_member_access_notifications(self, organization_id: str) -> list[dict[str, Any]]:
+        payload = self.rpc("teams_v2_pop_member_access_notifications", {"target_organization_id": organization_id}, "권한 변경 알림을 받을 수 없습니다.")
+        return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+
     def staff_directory(self, organization_id: str) -> list[dict[str, Any]]:
         payload = self.rpc("teams_v2_staff_directory", {"target_organization_id": organization_id}, "직원 정보를 불러올 수 없습니다.")
         return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []

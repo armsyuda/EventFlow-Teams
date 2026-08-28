@@ -78,12 +78,12 @@ class StaffHorizontalScroll(QScrollArea):
 class EmployeeWorkPage(QWidget):
     """Company-visible active work board; personal absences remain calendar-only."""
 
-    def __init__(self, db, open_task: Callable[[int], None], current_user_id: str = "", on_color_change: Callable[[str], None] | None = None, can_transfer: bool = False, on_transfer: Callable[[str, str], bool] | None = None, parent=None):
-        super().__init__(parent); self.db = db; self.open_task = open_task; self.current_user_id = current_user_id; self.on_color_change = on_color_change; self.can_transfer = can_transfer; self.on_transfer = on_transfer
+    def __init__(self, db, open_task: Callable[[int], None], current_user_id: str = "", on_color_change: Callable[[str], None] | None = None, can_transfer: bool = False, on_transfer: Callable[[str, str], bool] | None = None, on_refresh_staff: Callable[[], None] | None = None, parent=None):
+        super().__init__(parent); self.db = db; self.open_task = open_task; self.current_user_id = current_user_id; self.on_color_change = on_color_change; self.can_transfer = can_transfer; self.on_transfer = on_transfer; self.on_refresh_staff = on_refresh_staff
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 32); root.setSpacing(12)
         root.addWidget(QLabel("직원업무", objectName="PageTitle"))
         root.addWidget(QLabel("동료가 맡은 진행 업무를 확인합니다. 개인 일정은 이 화면에 표시되지 않습니다.", objectName="PageDescription"))
-        filters = QHBoxLayout(); filters.addWidget(QLabel("업무 범위")); self.project_filter = QComboBox(); self.project_filter.currentIndexChanged.connect(self.refresh); filters.addWidget(self.project_filter); filters.addStretch(); root.addLayout(filters)
+        filters = QHBoxLayout(); filters.addWidget(QLabel("업무 범위")); self.project_filter = QComboBox(); self.project_filter.currentIndexChanged.connect(self.refresh); filters.addWidget(self.project_filter); filters.addStretch(); self.refresh_button = QPushButton("직원 목록 새로고침"); self.refresh_button.setProperty("quiet", True); self.refresh_button.clicked.connect(self._refresh_staff); filters.addWidget(self.refresh_button); root.addLayout(filters)
         self.scroll = StaffHorizontalScroll(); self.scroll.setObjectName("StaffWorkScroll"); self.scroll.setWidgetResizable(True); self.scroll.setFrameShape(QFrame.Shape.NoFrame); self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn); self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setStyleSheet("QScrollArea#StaffWorkScroll{background:#F7F8FA;border:1px solid #E5E7EB;border-radius:12px;} QScrollArea#StaffWorkScroll > QWidget > QWidget{background:#F7F8FA;} QScrollBar:horizontal{height:18px;background:#E8EDF3;border-radius:9px;margin:5px 16px 7px 16px;} QScrollBar::handle:horizontal{min-width:110px;background:#98A2B3;border-radius:8px;} QScrollBar::handle:horizontal:hover{background:#667085;} QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal{width:0px;}")
         self.container = QWidget(); self.container.setObjectName("StaffWorkCanvas"); self.container.setStyleSheet("QWidget#StaffWorkCanvas{background:#F7F8FA;}")
@@ -145,6 +145,17 @@ class EmployeeWorkPage(QWidget):
         self.container.setMinimumWidth(card_count * 300 + (card_count + 1) * 16)
         self.container.setMinimumHeight(722)
 
+    def _refresh_staff(self) -> None:
+        if not self.on_refresh_staff:
+            self.refresh()
+            return
+        self.refresh_button.setEnabled(False); self.refresh_button.setText("직원 확인 중…")
+        self.on_refresh_staff()
+
+    def staff_refresh_finished(self) -> None:
+        self.refresh_button.setEnabled(True); self.refresh_button.setText("직원 목록 새로고침")
+        self.refresh()
+
     def _task_card(self, task):
         return WorkTaskCard(task, self.open_task, self.can_transfer)
 
@@ -154,7 +165,7 @@ class EmployeeWorkPage(QWidget):
             condition = "w.status='완료'" if completed else "w.status NOT IN ('완료','해당없음')"
             scope = self.project_filter.currentData() if hasattr(self, "project_filter") else ""; filter_sql = " AND w.event_id=?" if scope else ""; args = (user_id, scope) if scope else (user_id,)
             return self.db.query(f"""SELECT w.remote_id id,w.name,w.major,w.status,w.due_date,
-                COALESCE(e.name,CASE WHEN w.work_scope='COMPANY' THEN '회사 공통' ELSE '프로젝트' END) event_name
+                COALESCE(e.name,CASE WHEN w.work_scope='COMPANY' THEN '프로젝트 외' ELSE '프로젝트' END) event_name
                 FROM teams_v3_work_items w LEFT JOIN teams_v2_entity_map map ON map.entity_type='EVENT' AND map.remote_id=w.event_id
                 LEFT JOIN events e ON e.id=map.local_id WHERE w.assigned_member_user_id=? AND w.is_removed=0 AND {condition}{filter_sql}
                 ORDER BY COALESCE(w.due_date,'9999-12-31'),w.sort_order""", args)

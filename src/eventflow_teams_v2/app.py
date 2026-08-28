@@ -138,18 +138,18 @@ class OrganizationPage(QWidget):
         self.message = QLabel("회사를 확인하는 중…")
         self.company_list = QWidget(); self.company_list.setObjectName("TeamsCompanyList"); self.company_layout = QVBoxLayout(self.company_list); self.company_layout.setContentsMargins(0, 0, 0, 0); self.company_layout.setSpacing(7)
         self.more_button = QPushButton(); self.more_button.setProperty("quiet", True); self.more_button.hide(); self.more_button.clicked.connect(self._show_more)
-        self.button = QPushButton("선택한 회사로 시작"); self.button.setProperty("primary", True); self.button.setEnabled(False)
         self.retry_button = QPushButton("회사 목록 다시 시도"); self.retry_button.setProperty("quiet", True); self.retry_button.hide(); self.retry_button.clicked.connect(self._retry)
-        card = QFrame(); card.setObjectName("Card"); card.setMaximumWidth(520); layout = QVBoxLayout(card); layout.setContentsMargins(36, 34, 36, 34); layout.addWidget(QLabel("회사 선택", objectName="PageTitle")); layout.addWidget(QLabel("작업할 회사를 선택하면 저장된 작업본을 먼저 열고, 변경분은 뒤에서 조용히 동기화합니다.", objectName="PageDescription")); layout.addWidget(self.message); layout.addWidget(self.company_list); layout.addWidget(self.more_button); layout.addWidget(self.button)
+        card = QFrame(); card.setObjectName("Card"); card.setMaximumWidth(520); layout = QVBoxLayout(card); layout.setContentsMargins(36, 34, 36, 34); layout.setSpacing(12); layout.addWidget(QLabel("회사 선택", objectName="PageTitle")); layout.addWidget(QLabel("시작할 회사를 누르면 바로 업무 화면으로 들어갑니다.", objectName="PageDescription")); layout.addWidget(self.message); layout.addWidget(self.company_list); layout.addWidget(self.more_button)
         layout.addWidget(self.retry_button)
-        self.logout_button = QPushButton("로그아웃"); self.logout_button.setProperty("quiet", True); layout.addWidget(self.logout_button)
-        root = QVBoxLayout(self); root.setContentsMargins(24, 24, 24, 24); root.addStretch(); root.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter); root.addStretch(); self.button.clicked.connect(self.choose)
+        divider = QFrame(); divider.setFrameShape(QFrame.Shape.HLine); divider.setStyleSheet("color:#E2E8F0;"); layout.addSpacing(12); layout.addWidget(divider); layout.addSpacing(8)
+        self.logout_button = QPushButton("로그아웃"); self.logout_button.setProperty("quiet", True); layout.addWidget(self.logout_button, 0, Qt.AlignmentFlag.AlignRight)
+        root = QVBoxLayout(self); root.setContentsMargins(24, 24, 24, 24); root.addStretch(); root.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter); root.addStretch()
         self.logout_button.clicked.connect(self.logout_requested)
 
     def load(self) -> None:
         if getattr(self, "worker", None) and self.worker.isRunning():
             return
-        self.button.setEnabled(False); self.selected_organization = None; self.message.setText("접근 가능한 회사를 확인하는 중…")
+        self.selected_organization = None; self.message.setText("접근 가능한 회사를 확인하는 중…")
         self.retry_button.hide()
         self.worker = Worker(self.api.organizations); self.worker.finished.connect(self._loaded); self.worker.failed.connect(self._failed); self.worker.start()
 
@@ -161,14 +161,13 @@ class OrganizationPage(QWidget):
             if item.widget(): item.widget().deleteLater()
         self.company_buttons.clear()
         for index, organization in enumerate(self.organizations):
-            item = QPushButton(f"{organization.name}\n{organization.display_role}"); item.setObjectName("TeamsCompanyChoice"); item.setProperty("quiet", True); item.setCheckable(True); item.setVisible(index < 5)
-            item.clicked.connect(lambda _checked=False, value=organization: self._select(value))
+            item = QPushButton(organization.name); item.setObjectName("TeamsCompanyChoice"); item.setProperty("primary", True); item.setToolTip(organization.display_role); item.setVisible(index < 5)
+            item.clicked.connect(lambda _checked=False, value=organization: self.choose(value))
             self.company_buttons.append(item); self.company_layout.addWidget(item)
         hidden_count = max(0, len(self.organizations) - 5)
         self.more_button.setText(f"회사 {hidden_count}개 더 보기" if hidden_count else "")
         self.more_button.setVisible(bool(hidden_count))
-        if self.organizations: self._select(self.organizations[0])
-        self.button.setEnabled(bool(self.organizations)); self.message.setText("작업할 회사를 선택하세요." if self.organizations else "현재 접근 가능한 회사가 없습니다.")
+        self.message.setText("회사를 누르면 바로 시작합니다." if self.organizations else "현재 접근 가능한 회사가 없습니다.")
         self.organizations_loaded.emit()
 
     def _failed(self, message: str) -> None:
@@ -187,14 +186,12 @@ class OrganizationPage(QWidget):
         self._automatic_retries = 0
         self.load()
 
-    def choose(self) -> None:
-        if self.selected_organization:
-            self.selected.emit(self.selected_organization)
+    def choose(self, organization: Organization) -> None:
+        self.selected_organization = organization
+        self.selected.emit(organization)
 
     def _select(self, organization: Organization) -> None:
         self.selected_organization = organization
-        for button, value in zip(self.company_buttons, self.organizations): button.setChecked(value.id == organization.id)
-        self.button.setText(f"{organization.name}로 시작")
 
     def _show_more(self) -> None:
         for button in self.company_buttons: button.show()
@@ -278,7 +275,7 @@ class CompanyMembersPage(QWidget):
         "OWNER": {"dashboard.view","events.view","events.create","events.edit","events.archive","checklist.view","checklist.edit","checklist.assign","checklist.structure","calendar.view","calendar.edit","settlement.view","settlement.edit","contacts.view","contacts.edit","master_items.view","master_items.edit","participants.view","participants.edit","exports.use","backup.create","backup.restore","members.view","members.manage","permissions.manage"},
         "ADMIN": {"dashboard.view","events.view","events.create","events.edit","events.archive","checklist.view","checklist.edit","checklist.assign","checklist.structure","calendar.view","calendar.edit","settlement.view","settlement.edit","contacts.view","contacts.edit","master_items.view","master_items.edit","participants.view","participants.edit","exports.use","backup.create","backup.restore","members.view","members.manage","permissions.manage"},
         "PM": {"dashboard.view","events.view","events.create","events.edit","events.archive","checklist.view","checklist.edit","checklist.assign","checklist.structure","calendar.view","calendar.edit","settlement.view","settlement.edit","contacts.view","exports.use"},
-        "MEMBER": {"dashboard.view","events.view","checklist.view","checklist.edit","checklist.assign","checklist.structure","calendar.view","calendar.edit","contacts.view","exports.use"},
+        "MEMBER": {"dashboard.view","events.view","events.create","checklist.view","checklist.edit","checklist.assign","checklist.structure","calendar.view","calendar.edit","contacts.view","exports.use"},
         "VIEWER": {"dashboard.view","events.view","checklist.view","calendar.view","contacts.view","exports.use"},
     }
     permission_groups = {
@@ -287,7 +284,7 @@ class CompanyMembersPage(QWidget):
     }
 
     def __init__(self, api: TeamsV2Api, organization: Organization) -> None:
-        super().__init__(); self.api = api; self.organization = organization; self.members: list[dict] = []; self.selected_member: dict | None = None; self.permission_boxes: dict[str, QCheckBox] = {}; self.permission_rows: list[tuple[QCheckBox, QCheckBox | None, tuple[str, ...], tuple[str, ...]]] = []; self._updating_permissions = False
+        super().__init__(); self.api = api; self.organization = organization; self.members: list[dict] = []; self.selected_member: dict | None = None; self.permission_boxes: dict[str, QCheckBox] = {}; self.permission_rows: list[tuple[QCheckBox, QCheckBox | None, tuple[str, ...], tuple[str, ...]]] = []; self._updating_permissions = False; self._dirty = False
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 28); root.setSpacing(12)
         top = QHBoxLayout(); top.addWidget(QLabel("직원 및 권한", objectName="PageTitle")); top.addStretch(); self.back = QPushButton("← 회사 관리"); self.back.setProperty("quiet", True); self.refresh = QPushButton("새로고침"); self.refresh.setProperty("primary", True); top.addWidget(self.back); top.addWidget(self.refresh); root.addLayout(top)
         root.addWidget(QLabel("왼쪽에서 직원을 선택한 뒤 역할과 화면별 조회·편집 권한을 정하세요. 편집을 허용하면 조회도 함께 허용됩니다.", objectName="PageDescription"))
@@ -303,6 +300,7 @@ class CompanyMembersPage(QWidget):
         for code in ("OWNER","ADMIN","PM","MEMBER","VIEWER"): self.role.addItem(self.role_labels[code], code)
         form.addRow("역할", self.role); form.addRow("상태", self.status); detail_layout.addLayout(form)
         self.notice = QLabel("역할을 고르면 권장 권한이 설정됩니다. 필요한 화면만 조회 또는 편집으로 조정하세요."); self.notice.setObjectName("InfoGuide"); detail_layout.addWidget(self.notice)
+        self.save_state = QLabel("저장된 변경사항이 없습니다.", objectName="Muted"); detail_layout.addWidget(self.save_state)
         for group, permissions in self.permission_groups.items():
             section = QFrame(); section.setObjectName("TeamsPermissionSection"); section.setStyleSheet("QFrame#TeamsPermissionSection { background:#FAFAFB; border:1px solid #E3E5E8; border-radius:10px; } QLabel#SectionTitle { border:none; }")
             section_layout = QVBoxLayout(section); section_layout.setContentsMargins(16, 13, 16, 13); section_layout.setSpacing(10)
@@ -317,13 +315,16 @@ class CompanyMembersPage(QWidget):
                 self.permission_rows.append((view_box, edit_box, view_codes, edit_codes))
                 for code in (*view_codes, *edit_codes): self.permission_boxes[code] = edit_box if code in edit_codes and edit_box else view_box
                 view_box.toggled.connect(lambda checked, edit=edit_box: self._view_toggled(checked, edit))
-                if edit_box: edit_box.toggled.connect(lambda checked, view=view_box: self._edit_toggled(checked, view))
+                view_box.toggled.connect(self._mark_dirty)
+                if edit_box:
+                    edit_box.toggled.connect(lambda checked, view=view_box: self._edit_toggled(checked, view))
+                    edit_box.toggled.connect(self._mark_dirty)
             grid.setColumnStretch(0, 1); grid.setColumnMinimumWidth(1, 76); grid.setColumnMinimumWidth(2, 92)
             section_layout.addLayout(grid); detail_layout.addWidget(section)
         export_section = QFrame(); export_section.setObjectName("TeamsPermissionSection"); export_section.setStyleSheet("QFrame#TeamsPermissionSection { background:#FAFAFB; border:1px solid #E3E5E8; border-radius:10px; } QLabel#SectionTitle { border:none; }")
         export_layout = QHBoxLayout(export_section); export_layout.setContentsMargins(16, 13, 16, 13); export_layout.addWidget(QLabel("출력", objectName="SectionTitle")); export_layout.addStretch(); self.export_box = QCheckBox("PDF·Excel 출력 허용"); self.permission_boxes["exports.use"] = self.export_box; export_layout.addWidget(self.export_box); detail_layout.addWidget(export_section)
-        detail_layout.addStretch(); self.apply = QPushButton("변경사항 적용"); self.apply.setProperty("primary", True); self.apply.setEnabled(False); detail_layout.addWidget(self.apply)
-        self.back.clicked.connect(self.back_requested); self.refresh.clicked.connect(self.load); self.table.cellClicked.connect(self._select_row); self.role.currentIndexChanged.connect(self._role_changed); self.apply.clicked.connect(self.apply_changes)
+        detail_layout.addStretch(); self.apply = QPushButton("변경사항 저장"); self.apply.setProperty("primary", True); self.apply.setEnabled(False); detail_layout.addWidget(self.apply)
+        self.back.clicked.connect(self.back_requested); self.refresh.clicked.connect(self.load); self.table.cellClicked.connect(self._select_row); self.role.currentIndexChanged.connect(self._role_changed); self.status.currentIndexChanged.connect(self._mark_dirty); self.export_box.toggled.connect(self._mark_dirty); self.apply.clicked.connect(self.apply_changes)
 
     def load(self) -> None:
         self.refresh.setEnabled(False); self.message.setText("직원 목록을 불러오는 중…")
@@ -357,11 +358,12 @@ class CompanyMembersPage(QWidget):
             view_box.setChecked(all(overrides.get(code) == "ALLOW" or (code in defaults and overrides.get(code) != "DENY") for code in view_codes))
             if edit_box: edit_box.setChecked(all(overrides.get(code) == "ALLOW" or (code in defaults and overrides.get(code) != "DENY") for code in edit_codes))
         self.export_box.setChecked(overrides.get("exports.use") == "ALLOW" or ("exports.use" in defaults and overrides.get("exports.use") != "DENY"))
-        self._updating_permissions = False
+        self._updating_permissions = False; self._dirty = False
         locked = role == "OWNER" and self.organization.role != "OWNER"
-        self.role.setEnabled(not locked); self.status.setEnabled(not locked); self.apply.setEnabled(not locked)
+        self.role.setEnabled(not locked); self.status.setEnabled(not locked); self.apply.setEnabled(False)
         for box in set(self.permission_boxes.values()): box.setEnabled(not locked)
         self.notice.setText("회사 소유자는 소유자만 변경할 수 있습니다." if locked else "프로젝트 참여자·백업·직원 관리는 역할에 따라 자동 적용됩니다.")
+        self.save_state.setText("저장된 변경사항이 없습니다." if not locked else "회사 소유자 권한은 소유자만 바꿀 수 있습니다.")
 
     def _role_changed(self) -> None:
         if not self.selected_member: return
@@ -369,7 +371,7 @@ class CompanyMembersPage(QWidget):
         for view_box, edit_box, view_codes, edit_codes in self.permission_rows:
             view_box.setChecked(all(code in defaults for code in view_codes))
             if edit_box: edit_box.setChecked(all(code in defaults for code in edit_codes))
-        self.export_box.setChecked("exports.use" in defaults); self._updating_permissions = False
+        self.export_box.setChecked("exports.use" in defaults); self._updating_permissions = False; self._mark_dirty()
 
     def apply_changes(self) -> None:
         if not self.selected_member: return
@@ -379,14 +381,25 @@ class CompanyMembersPage(QWidget):
             requested.update({code: view_box.isChecked() for code in view_codes})
             if edit_box: requested.update({code: edit_box.isChecked() for code in edit_codes})
         overrides = [{"permission_code": code, "effect": "ALLOW" if allowed else "DENY"} for code, allowed in requested.items() if allowed != (code in defaults)]
-        self.apply.setEnabled(False); self.message.setText("변경사항을 적용하는 중…")
+        self.apply.setEnabled(False); self.apply.setText("서버에 저장 중…"); self.message.setText("변경사항을 서버에 저장하는 중…")
         try:
-            self.api.update_company_member(self.organization.id, user_id, role, status)
-            self.api.save_member_permission_overrides(self.organization.id, user_id, overrides)
+            self.api.save_company_member_access(self.organization.id, user_id, role, status, overrides)
         except ApiError as exc:
-            self.message.setText(str(exc)); self.apply.setEnabled(True); return
-        self.message.setText(f"{self.person.text()}님의 역할과 메뉴 권한을 변경했습니다.")
+            self.message.setText(str(exc)); self.apply.setText("변경사항 저장"); self.apply.setEnabled(True); return
+        saved_name = self.person.text()
+        self._dirty = False; self.apply.setText("변경사항 저장")
         self.load()
+        self.save_state.setText("서버 저장 완료 · 대상 직원에게 권한 변경 알림을 보냈습니다.")
+        self.message.setText(f"{saved_name}님의 역할과 메뉴 권한을 서버에 저장했습니다.")
+
+    def _mark_dirty(self, *_args) -> None:
+        if self._updating_permissions or not self.selected_member:
+            return
+        role = str(self.selected_member.get("role") or "MEMBER")
+        locked = role == "OWNER" and self.organization.role != "OWNER"
+        if locked:
+            return
+        self._dirty = True; self.apply.setEnabled(True); self.save_state.setText("저장 전 변경사항이 있습니다. ‘변경사항 저장’을 누르세요.")
 
     def _view_toggled(self, checked: bool, edit_box: QCheckBox | None) -> None:
         if self._updating_permissions or checked or not edit_box: return
@@ -505,7 +518,7 @@ class GuestInvitationDialog(QDialog):
 class TeamsV2Window(QMainWindow):
     def __init__(self, config: TeamsV2Config) -> None:
         super().__init__(); self.config = config; self.store = SessionStore(); self.api = TeamsV2Api(config); self.workspace_db: WorkspaceDatabase | None = None
-        self.local_window: MainWindow | None = None; self.current_organization: Organization | None = None; self.permission_worker: Worker | None = None; self.snapshot_worker: Worker | None = None; self.changes_worker: Worker | None = None; self.sync_engine: WorkspaceSyncEngine | None = None; self.realtime: RealtimeSignalClient | None = None; self._sync_workers: list[Worker] = []; self._opened_cursor = ""; self._opened_with_pending = False
+        self.local_window: MainWindow | None = None; self.current_organization: Organization | None = None; self.permission_worker: Worker | None = None; self.snapshot_worker: Worker | None = None; self.changes_worker: Worker | None = None; self.access_refresh_worker: Worker | None = None; self.sync_engine: WorkspaceSyncEngine | None = None; self.realtime: RealtimeSignalClient | None = None; self._sync_workers: list[Worker] = []; self._opened_cursor = ""; self._opened_with_pending = False
         self.update_info: UpdateInfo | None = None; self.update_progress: StartupSplash | None = None; self.update_check_worker: Worker | None = None; self.update_download_worker: Worker | None = None
         self.company_management_page: CompanyManagementPage | None = None; self.company_members_page: CompanyMembersPage | None = None; self.guest_management_page: GuestManagementPage | None = None
         self.company_workspace: CompanyWorkspace | None = None; self.company_work_page: CompanyWorkPage | None = None; self.company_calendar_page: CompanyCalendarPage | None = None; self.company_finance_page: FinancePage | None = None; self.company_v3_buttons: list[QPushButton] = []; self.v3_worker: Worker | None = None; self.v3_mutation_inflight = False; self._v3_initial_open = False
@@ -575,7 +588,7 @@ class TeamsV2Window(QMainWindow):
                 (self.api.session.user_id, self.api.session.email.split("@", 1)[0], organization.role, "", "#A7D7F1"),
             )
             self.workspace_db.conn.commit()
-        staff_page = EmployeeWorkPage(self.workspace_db, local.open_teams_task, self.api.session.user_id, self._change_my_color, organization.role in {"OWNER", "ADMIN"}, self._transfer_task_member, local)
+        staff_page = EmployeeWorkPage(self.workspace_db, local.open_teams_task, self.api.session.user_id, self._change_my_color, organization.role in {"OWNER", "ADMIN"}, self._transfer_task_member, self._refresh_staff_directory, local)
         local.install_teams_staff_page(staff_page)
         self.my_space_page = MySpacePage(self.workspace_db, self.api.session.user_id, self._change_my_color, self._save_personal_schedule_values, self._edit_personal_schedule, self._delete_personal_schedule, self._reorder_my_schedules, self._reorder_my_tasks, self._save_my_task_details, local)
         local.stack.addWidget(self.my_space_page)
@@ -1000,8 +1013,22 @@ class TeamsV2Window(QMainWindow):
         try:
             WorkspaceSnapshotStore(self.workspace_db).replace_staff_members([item for item in members if isinstance(item, dict)])
             self.workspace_db.conn.commit(); self.local_window.refresh_all(self.local_window.selected_event_id)
+            if hasattr(self.local_window, "staff_work_page"):
+                self.local_window.staff_work_page.staff_refresh_finished()
         except Exception:
+            if hasattr(self.local_window, "staff_work_page"):
+                self.local_window.staff_work_page.staff_refresh_finished()
+
+    def _refresh_staff_directory(self) -> None:
+        if not self.current_organization or not self.workspace_db or not self.local_window:
             return
+        organization_id = self.current_organization.id
+        if getattr(self, "staff_directory_worker", None) and self.staff_directory_worker.isRunning():
+            return
+        self.staff_directory_worker = Worker(lambda: self.api.staff_directory(organization_id))
+        self.staff_directory_worker.finished.connect(lambda members, oid=organization_id: self._staff_directory_loaded(oid, members))
+        self.staff_directory_worker.failed.connect(lambda _message: hasattr(self.local_window, "staff_work_page") and self.local_window.staff_work_page.staff_refresh_finished())
+        self.staff_directory_worker.start()
 
     def _workspace_snapshot_with_staff(self, organization_id: str) -> dict:
         snapshot = self.api.workspace_snapshot(organization_id)
@@ -1258,9 +1285,10 @@ class TeamsV2Window(QMainWindow):
             return
         self.realtime = RealtimeSignalClient(
             self.config.supabase_url, self.config.publishable_key,
-            self.api.session.access_token, self.current_organization.id,
+            self.api.session.access_token, self.current_organization.id, self.api.session.user_id,
         )
         self.realtime.changed.connect(self._request_realtime_changes)
+        self.realtime.access_changed.connect(self._refresh_after_access_change)
         self.realtime.state_changed.connect(self._realtime_state_changed)
         self.realtime.start()
 
@@ -1269,6 +1297,39 @@ class TeamsV2Window(QMainWindow):
             return
         if state == "WAITING":
             self._set_sync_state("WAITING", text)
+
+    def _refresh_after_access_change(self) -> None:
+        """Reload the app boundary immediately after a manager changes this user's access."""
+        if not self.current_organization or not self.api.session or (self.access_refresh_worker and self.access_refresh_worker.isRunning()):
+            return
+        previous_id = self.current_organization.id
+
+        def load_access() -> tuple[list[Organization], list[dict]]:
+            notices: list[dict] = []
+            try:
+                notices = self.api.pop_member_access_notifications(previous_id)
+            except ApiError:
+                pass
+            return self.api.organizations(), notices
+
+        self.access_refresh_worker = Worker(load_access)
+        self.access_refresh_worker.finished.connect(lambda value, oid=previous_id: self._access_refresh_loaded(oid, value))
+        self.access_refresh_worker.failed.connect(lambda message: self._show_toast(f"권한 변경 확인 실패: {message}"))
+        self.access_refresh_worker.start()
+
+    def _access_refresh_loaded(self, previous_id: str, value: object) -> None:
+        if not isinstance(value, tuple) or len(value) != 2:
+            return
+        organizations, notices = value
+        messages = [str(item.get("message")) for item in notices if isinstance(item, dict) and item.get("message")]
+        message = "\n".join(messages) if messages else "회사 권한이 변경되었습니다."
+        target = next((item for item in organizations if item.id == previous_id), None) if isinstance(organizations, list) else None
+        if target:
+            self._show_toast(f"{message}\n새 권한을 적용하기 위해 화면을 새로고침합니다.")
+            QTimer.singleShot(350, lambda organization=target: self._open_workspace(organization))
+            return
+        QMessageBox.information(self, "권한 변경", f"{message}\n현재 회사 접근이 변경되어 회사 선택 화면으로 이동합니다.")
+        self._close_workspace(); self.organizations.load(); self.stack.setCurrentWidget(self.organizations)
 
     def _request_realtime_changes(self) -> None:
         """Fetch authorized deltas after a signal; never refresh a whole screen."""

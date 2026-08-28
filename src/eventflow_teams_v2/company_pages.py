@@ -18,7 +18,7 @@ FINANCE_STATUS_LABELS = {"PLANNED": "예정", "COMPLETED": "완료", "CANCELED":
 
 def _project_name(db, event_id: str | None) -> str:
     if not event_id:
-        return "회사 공통"
+        return "프로젝트 외"
     row = db.one("SELECT e.name FROM events e JOIN teams_v2_entity_map m ON m.entity_type='EVENT' AND m.local_id=e.id WHERE m.remote_id=?", (event_id,))
     return str(row["name"]) if row else "프로젝트"
 
@@ -27,14 +27,14 @@ class CompanyWorkPage(QWidget):
     def __init__(self, db, create_work: Callable[[dict], None], open_project: Callable[[str], None] | None = None, parent=None):
         super().__init__(parent); self.db = db; self.create_work = create_work; self.open_project = open_project; self.can_edit = False
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 32); root.setSpacing(12)
-        top = QHBoxLayout(); copy = QVBoxLayout(); copy.addWidget(QLabel("전체 업무", objectName="PageTitle")); copy.addWidget(QLabel("모든 프로젝트 업무와 회사 공통 업무를 한 곳에서 확인합니다.", objectName="PageDescription")); top.addLayout(copy, 1)
+        top = QHBoxLayout(); copy = QVBoxLayout(); copy.addWidget(QLabel("전체 업무", objectName="PageTitle")); copy.addWidget(QLabel("모든 프로젝트 업무와 프로젝트 외 업무를 한 곳에서 확인합니다.", objectName="PageDescription")); top.addLayout(copy, 1)
         self.add_button = QPushButton("업무 추가"); self.add_button.clicked.connect(self._add); top.addWidget(self.add_button); root.addLayout(top)
         filters = QHBoxLayout(); self.project = QComboBox(); self.member = QComboBox(); self.project.currentIndexChanged.connect(self.refresh); self.member.currentIndexChanged.connect(self.refresh); self.status = QComboBox(); self.status.addItems(["전체 상태", "미착수", "진행중", "확인요청", "완료", "보류", "해당없음"]); self.status.currentIndexChanged.connect(self.refresh); filters.addWidget(QLabel("프로젝트")); filters.addWidget(self.project); filters.addSpacing(12); filters.addWidget(QLabel("담당자")); filters.addWidget(self.member); filters.addSpacing(12); filters.addWidget(QLabel("상태")); filters.addWidget(self.status); filters.addStretch(); root.addLayout(filters)
         self.scroll = QScrollArea(); self.scroll.setObjectName("CompanyWorkScroll"); self.scroll.setWidgetResizable(True); self.scroll.setFrameShape(QFrame.Shape.NoFrame); self.scroll.setStyleSheet("QScrollArea#CompanyWorkScroll{background:#F7F8FA;border:none;} QScrollArea#CompanyWorkScroll > QWidget > QWidget{background:#F7F8FA;}"); self.canvas = QWidget(); self.canvas.setObjectName("CompanyWorkCanvas"); self.canvas.setStyleSheet("QWidget#CompanyWorkCanvas{background:#F7F8FA;}"); self.rows = QVBoxLayout(self.canvas); self.rows.setContentsMargins(0, 0, 0, 0); self.rows.setSpacing(7); self.rows.setAlignment(Qt.AlignmentFlag.AlignTop); self.scroll.setWidget(self.canvas); root.addWidget(self.scroll, 1)
 
     def refresh(self) -> None:
         current, current_member = self.project.currentData(), self.member.currentData()
-        self.project.blockSignals(True); self.member.blockSignals(True); self.project.clear(); self.member.clear(); self.project.addItem("전체 프로젝트", "") ; self.project.addItem("회사 공통", "__COMPANY__")
+        self.project.blockSignals(True); self.member.blockSignals(True); self.project.clear(); self.member.clear(); self.project.addItem("전체 프로젝트", "") ; self.project.addItem("프로젝트 외", "__COMPANY__")
         for row in self.db.query("SELECT remote_id,name FROM teams_v2_entity_map m JOIN events e ON e.id=m.local_id WHERE m.entity_type='EVENT' ORDER BY e.name"):
             self.project.addItem(str(row["name"]), str(row["remote_id"]))
         found = self.project.findData(current)
@@ -76,7 +76,7 @@ class CompanyWorkPage(QWidget):
     def _add(self) -> None:
         if not self.can_edit:
             return
-        dialog = QDialog(self); dialog.setWindowTitle("회사 전체 업무 추가"); form = QFormLayout(dialog); scope = QComboBox(); scope.addItem("회사 공통", "COMPANY")
+        dialog = QDialog(self); dialog.setWindowTitle("회사 전체 업무 추가"); form = QFormLayout(dialog); scope = QComboBox(); scope.addItem("프로젝트 외", "COMPANY")
         for row in self.db.query("SELECT remote_id,name FROM teams_v2_entity_map m JOIN events e ON e.id=m.local_id WHERE m.entity_type='EVENT' ORDER BY e.name"): scope.addItem(str(row["name"]), str(row["remote_id"]))
         name = QLineEdit(); major = QLineEdit("회사 운영"); minor = QLineEdit("기타"); form.addRow("프로젝트", scope); form.addRow("업무명", name); form.addRow("대분류", major); form.addRow("중분류", minor); buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel); form.addRow(buttons); buttons.rejected.connect(dialog.reject)
         def accept() -> None:
@@ -99,7 +99,7 @@ class FinancePage(QWidget):
         self.project.currentIndexChanged.connect(self.refresh); self.kind.currentIndexChanged.connect(self.refresh); self.status.currentIndexChanged.connect(self.refresh)
 
     def refresh(self) -> None:
-        selected_project = self.project.currentData(); self.project.blockSignals(True); self.project.clear(); self.project.addItem("회사 전체", ""); self.project.addItem("회사 공통 정산", "__COMPANY__")
+        selected_project = self.project.currentData(); self.project.blockSignals(True); self.project.clear(); self.project.addItem("회사 전체", ""); self.project.addItem("프로젝트 외 정산", "__COMPANY__")
         for row in self.db.query("SELECT remote_id,name FROM teams_v2_entity_map m JOIN events e ON e.id=m.local_id WHERE m.entity_type='EVENT' ORDER BY e.name"): self.project.addItem(str(row["name"]), str(row["remote_id"]))
         self.project.setCurrentIndex(max(0, self.project.findData(selected_project))); self.project.blockSignals(False)
         while self.rows.count():
@@ -143,7 +143,7 @@ class FinancePage(QWidget):
             return
         prefill = self._task_prefill or {}
         dialog = QDialog(self); dialog.setWindowTitle("실제 정산 추가"); form = QFormLayout(dialog); title = QLineEdit(prefill.get("title", "")); amount = QLineEdit(); kind = QComboBox(); kind.addItems(["EXPENSE", "INCOME", "REFUND", "ADJUSTMENT"]); status = QComboBox(); status.addItems(["PLANNED", "COMPLETED"]); project = QComboBox()
-        if self.allow_company: project.addItem("회사 공통", "")
+        if self.allow_company: project.addItem("프로젝트 외", "")
         for row in self.db.query("SELECT remote_id,name FROM teams_v2_entity_map m JOIN events e ON e.id=m.local_id WHERE m.entity_type='EVENT' ORDER BY e.name"): project.addItem(str(row["name"]), str(row["remote_id"]))
         selected_project = self.project.currentData()
         if selected_project == "__COMPANY__": project.setCurrentIndex(0)
@@ -196,7 +196,7 @@ class CompanyCalendarPage(QWidget):
     def __init__(self, db, parent=None):
         super().__init__(parent); self.db = db
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 32); root.setSpacing(12)
-        title_row = QHBoxLayout(); title_row.setSpacing(14); title_row.addWidget(QLabel("전체 달력", objectName="PageTitle")); description = QLabel("모든 프로젝트 업무와 회사 공통 업무를 표시합니다.", objectName="PageDescription"); title_row.addWidget(description, 0, Qt.AlignmentFlag.AlignBottom); title_row.addStretch(); root.addLayout(title_row)
+        title_row = QHBoxLayout(); title_row.setSpacing(14); title_row.addWidget(QLabel("전체 달력", objectName="PageTitle")); description = QLabel("모든 프로젝트 업무와 프로젝트 외 업무를 표시합니다.", objectName="PageDescription"); title_row.addWidget(description, 0, Qt.AlignmentFlag.AlignBottom); title_row.addStretch(); root.addLayout(title_row)
         filters = QHBoxLayout(); filters.setSpacing(10); self.project = QComboBox(); self.member = QComboBox(); self.personal = QCheckBox("개인 일정 표시"); self.personal.setChecked(True)
         for item in (self.project, self.member): item.currentIndexChanged.connect(self.refresh)
         self.previous = QPushButton("‹"); self.next = QPushButton("›"); self.month = QLabel(objectName="SectionTitle"); self.month.setMinimumWidth(124); self.month.setAlignment(Qt.AlignmentFlag.AlignCenter); self.previous.setToolTip("이전 달"); self.next.setToolTip("다음 달")
@@ -219,7 +219,7 @@ class CompanyCalendarPage(QWidget):
 
     def _load_filters(self) -> None:
         selected_project, selected_member = self.project.currentData(), self.member.currentData()
-        self.project.blockSignals(True); self.member.blockSignals(True); self.project.clear(); self.member.clear(); self.project.addItem("전체 프로젝트", ""); self.project.addItem("회사 공통", "__COMPANY__")
+        self.project.blockSignals(True); self.member.blockSignals(True); self.project.clear(); self.member.clear(); self.project.addItem("전체 프로젝트", ""); self.project.addItem("프로젝트 외", "__COMPANY__")
         for row in self.db.query("SELECT remote_id,name FROM teams_v2_entity_map m JOIN events e ON e.id=m.local_id WHERE m.entity_type='EVENT' ORDER BY e.name"): self.project.addItem(str(row["name"]), str(row["remote_id"]))
         self.member.addItem("전체 직원", "")
         try:

@@ -6,7 +6,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QPushButton, QTableWidgetItem
 
 from eventflow_teams_v2.api import Organization
-from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, TeamsV2Window
+from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, OrganizationPage, TeamsV2Window
+from eventflow_teams_v2.staff_pages import EmployeeWorkPage
 from eventflow_teams_v2.config import TeamsV2Config
 from eventflow_teams_v2.session import Session
 from eventflow_teams_v2.workspace import WorkspaceDatabase, workspace_database_path
@@ -45,6 +46,52 @@ def test_company_permission_editor_uses_simple_read_and_edit_rows() -> None:
     assert checklist_edit is not None
     checklist_view.setChecked(False); assert not checklist_edit.isChecked()
     checklist_edit.setChecked(True); assert checklist_view.isChecked()
+    page.deleteLater()
+
+
+def test_company_permission_editor_requires_explicit_save_and_uses_atomic_api() -> None:
+    QApplication.instance() or QApplication([])
+    api = Mock(); page = CompanyMembersPage(api, Organization("org", "회사", "OWNER"))
+    page.members = [{"user_id": "member", "display_name": "직원", "email": "member@example.com", "role": "MEMBER", "status": "ACTIVE", "overrides": []}]
+    api.company_members.return_value = page.members
+    page.table.setRowCount(1)
+    page._select_row(0, 0)
+
+    assert not page.apply.isEnabled()
+    page.status.setCurrentIndex(page.status.findData("SUSPENDED"))
+    assert page.apply.isEnabled()
+    assert "저장 전" in page.save_state.text()
+    page.apply_changes()
+
+    api.save_company_member_access.assert_called_once()
+    assert "서버에 저장했습니다" in page.message.text()
+    page.deleteLater()
+
+
+def test_company_selection_uses_one_direct_button_per_company() -> None:
+    QApplication.instance() or QApplication([])
+    page = OrganizationPage(Mock())
+    selected: list[str] = []
+    page.selected.connect(lambda organization: selected.append(organization.id))
+    page._loaded([Organization("jmt", "JMT", "OWNER")])
+
+    assert len(page.company_buttons) == 1
+    assert page.company_buttons[0].text() == "JMT"
+    page.company_buttons[0].click()
+    assert selected == ["jmt"]
+    page.deleteLater()
+
+
+def test_employee_work_page_has_explicit_staff_refresh() -> None:
+    QApplication.instance() or QApplication([])
+    refreshed: list[bool] = []
+    page = EmployeeWorkPage(Mock(query=lambda *_args: []), lambda _task_id: None, on_refresh_staff=lambda: refreshed.append(True))
+    page.refresh_button.click()
+
+    assert refreshed == [True]
+    assert not page.refresh_button.isEnabled()
+    page.staff_refresh_finished()
+    assert page.refresh_button.isEnabled()
     page.deleteLater()
 
 

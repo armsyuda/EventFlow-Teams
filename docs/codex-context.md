@@ -22,3 +22,16 @@
 - OWNER/ADMIN은 회사 관리의 가입 요청 확인에서 직원 요청을 승인 또는 반려하고, 승인 시 기본 일반 직원 또는 선택 역할을 부여한다.
 - 상단 동기화 상태 옆 `↻`는 서버 회사 목록·소속·권한·전체 작업본을 강제로 다시 확인한다. 미전송 로컬 변경이 있으면 덮어쓰지 않는다.
 - 사용자 전용 Realtime 신호는 가입 승인·역할·상태·세부 권한 변경 후 같은 강제 갱신을 실행한다. 설치 파일·릴리스는 생성하지 않는다.
+
+## 2026-08-28 권한 저장·직원 새로고침·검토 실행 파일
+
+- 회사 관리의 직원 권한 화면은 변경 내용을 즉시 저장하지 않는다. `저장 전 변경사항` 상태와 명시적 `변경사항 저장` 버튼을 제공하며, 역할·상태·세부 메뉴 권한을 `teams_v2_save_company_member_access` 단일 서버 트랜잭션으로 저장한다. 대상 직원에게는 권한 변경 알림을 적재하고, 본인 전용 access signal 수신 시 새 권한을 다시 받아 앱 화면을 새로 연다.
+- 일반 직원(MEMBER) 역할에 `events.create`를 부여해 대시보드의 `+ 새 행사`를 사용할 수 있게 했다. 직원업무에는 `직원 목록 새로고침`을 추가해 새 가입 직원 카드가 즉시 다시 내려받아 표시된다.
+- 회사 선택은 회사 이름 버튼 하나를 누르면 바로 시작하도록 단순화했고, 로그아웃은 구분선 아래에 배치했다. 모든 사용자 표시 `회사 공통`은 `프로젝트 외`로 바꿨다.
+- 검증: Teams Pytest 38건, Python compileall, 공백 검사, live 서버 함수/일반직원 행사 생성 권한 확인, 검토 EXE 7초 기동 검사를 통과했다. 검토 EXE는 `C:\Work\02\_EventFlow-web\desktop\teams-v2\release\EventFlowTeamsV2\EventFlowTeamsV2.exe`에만 만들었으며 GitHub Release·자동 업데이트는 아직 수행하지 않았다.
+
+## 2026-08-28 검토 EXE QtCore 기동 오류 수정
+
+- 검토 EXE가 일반 사용자 환경에서 `QtCore`를 불러오지 못하던 원인은 PyInstaller가 개발 환경 PATH의 호환되지 않는 ICU DLL을 포함하거나 Windows ICU bridge 일부를 누락한 것이었다.
+- `build_windows.ps1`은 이제 PySide6 DLL 경로를 먼저 등록하는 runtime hook을 포함하고, 빌드 후 Windows System32의 `icu.dll`, `icuin.dll`, `icuuc.dll`을 앱의 private runtime에 명시적으로 복사한다. 다음 clean build를 위해 복사본의 읽기 전용 특성도 해제한다.
+- 검토 파일을 기존 경로의 `EventFlowTeamsV2.exe`로 교체했다. System32만 남긴 격리 PATH와 별도 LOCALAPPDATA로 9초 기동을 확인했으며, 세 ICU DLL hash가 Windows System32 원본과 일치한다. GitHub Release·자동 업데이트는 계속 보류 상태다.
