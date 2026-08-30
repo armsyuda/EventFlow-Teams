@@ -122,4 +122,10 @@
 - Teams 검토 실행 파일이 8월 28일 빌드본에 머물러 있어, 현재 Teams 변경을 `0.3.63`으로 올렸다. `build_installer.ps1`은 독립 저장소에서 버전을 읽을 때 `src`를 모듈 경로에 포함하도록 보정했다.
 - `release\EventFlowTeams\EventFlowTeams.exe`와 `release\installer\EventFlowTeams-Setup-0.3.63.exe`를 만들었다. 격리된 사용자 데이터 폴더에서 패키지 실행 후 `--update-health-file`이 `ok`를 기록하는 것을 확인했다.
 - 검증: Teams Pytest 43건 및 Python compileall 통과. 전체 Pytest는 169건 통과했고, 6건은 별도 Local 제품의 과거 `EventFlow.exe`/릴리스 주소 기대값과 Teams 설치 구조가 달라 실패했다. Teams 공개 워크플로는 Teams 전용 검사만 실행한다.
-- 이 기록이 포함된 커밋의 `v0.3.63` 태그를 올리면 GitHub Actions가 설치 파일, 자동 업데이트 ZIP, SHA-256 목록을 공개하고 웹의 Windows 다운로드는 최신 설치 파일로 자동 연결된다.
+- `v0.3.63` 태그의 GitHub Actions가 설치 파일, 자동 업데이트 ZIP, SHA-256 목록을 공개했다. 웹 Windows 다운로드는 `EventFlowTeams-Setup-0.3.63.exe`로 302 연결되는 것을 확인했다.
+
+## 2026-08-30 Teams 자동 업데이트 검사 정리
+
+- `tests/local/test_update_service.py`에 남아 있던 과거 Local 제품의 `EventFlow.exe`·`EventFlow-Windows.zip`·별도 검토 설치 흐름 기대값은 Teams 실행 경로에 쓰이지 않아 제거했다.
+- 실제 Teams 업데이트에 필요한 Release 조회, ZIP 무결성 확인, 설치 폴더 marker, 업데이트 health/rollback 검사는 `tests/teams_v2/test_update_service.py`로 옮겨 `EventFlowTeams` 기준으로 유지했다. 이 검사는 태그 공개 시 GitHub Actions도 실행한다.
+- 검증: 전체 Pytest 172건, Python compileall, 공백 검사 통과.
