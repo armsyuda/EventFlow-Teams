@@ -198,6 +198,68 @@ class TeamsV2Api:
             raise ApiError("회사 전체 업무 저장 응답이 올바르지 않습니다.")
         return payload
 
+    def save_my_company_work(self, organization_id: str, task_id: str | None, expected_row_version: int | None, values: dict[str, Any]) -> dict[str, Any]:
+        """Save a self-owned company-work item through the restricted RPC."""
+        payload = self.rpc(
+            "teams_v3_save_my_company_work",
+            {
+                "target_organization_id": organization_id,
+                "target_task_id": task_id,
+                "expected_row_version": expected_row_version,
+                "work": values,
+            },
+            "사내 업무를 저장할 수 없습니다.",
+        )
+        if not isinstance(payload, dict):
+            raise ApiError("사내 업무 저장 응답이 올바르지 않습니다.")
+        return payload
+
+    def delete_my_company_work(self, organization_id: str, task_id: str, expected_row_version: int) -> dict[str, Any]:
+        """Soft-delete only the caller's own company-work item."""
+        payload = self.rpc(
+            "teams_v3_delete_my_company_work",
+            {
+                "target_organization_id": organization_id,
+                "target_task_id": task_id,
+                "expected_row_version": expected_row_version,
+            },
+            "사내 업무를 삭제할 수 없습니다.",
+        )
+        if not isinstance(payload, dict):
+            raise ApiError("사내 업무 삭제 응답이 올바르지 않습니다.")
+        return payload
+
+    def save_my_project_work(self, organization_id: str, task_id: str | None, expected_row_version: int | None, event_id: str, values: dict[str, Any]) -> dict[str, Any]:
+        """Save a self-owned, non-checklist task inside one accessible project."""
+        payload = self.rpc(
+            "teams_v3_save_my_project_work",
+            {"target_organization_id": organization_id, "target_task_id": task_id, "expected_row_version": expected_row_version, "target_event_id": event_id, "work": values},
+            "프로젝트 추가 업무를 저장할 수 없습니다.",
+        )
+        if not isinstance(payload, dict):
+            raise ApiError("프로젝트 추가 업무 저장 응답이 올바르지 않습니다.")
+        return payload
+
+    def delete_my_project_work(self, organization_id: str, task_id: str, expected_row_version: int) -> dict[str, Any]:
+        payload = self.rpc(
+            "teams_v3_delete_my_project_work",
+            {"target_organization_id": organization_id, "target_task_id": task_id, "expected_row_version": expected_row_version},
+            "프로젝트 추가 업무를 삭제할 수 없습니다.",
+        )
+        if not isinstance(payload, dict):
+            raise ApiError("프로젝트 추가 업무 삭제 응답이 올바르지 않습니다.")
+        return payload
+
+    def claim_my_checklist_work(self, organization_id: str, task_id: str, expected_row_version: int) -> dict[str, Any]:
+        payload = self.rpc(
+            "teams_v3_claim_my_checklist_work",
+            {"target_organization_id": organization_id, "target_task_id": task_id, "expected_row_version": expected_row_version},
+            "체크리스트 업무를 연결할 수 없습니다.",
+        )
+        if not isinstance(payload, dict):
+            raise ApiError("체크리스트 업무 연결 응답이 올바르지 않습니다.")
+        return payload
+
     def create_guest_invitation(self, event_id: str, allow_settlement: bool) -> dict[str, Any]:
         payload = self.rpc("teams_v2_create_guest_invitation", {"target_event_id": event_id, "allow_settlement": allow_settlement}, "게스트 초대를 만들 수 없습니다.")
         if not isinstance(payload, dict) or not payload.get("token"):
@@ -241,6 +303,14 @@ class TeamsV2Api:
                 "requested_overrides": overrides,
             },
             "직원 권한을 저장할 수 없습니다.",
+        )
+
+    def remove_company_member(self, organization_id: str, user_id: str) -> None:
+        """Stop one employee's access without deleting their account or history."""
+        self.rpc(
+            "teams_v2_remove_company_member",
+            {"target_organization_id": organization_id, "target_user_id": user_id},
+            "직원을 회사에서 삭제할 수 없습니다.",
         )
 
     def pop_member_access_notifications(self, organization_id: str) -> list[dict[str, Any]]:

@@ -29,7 +29,8 @@ class CompanyWorkspace:
               remote_id TEXT PRIMARY KEY, event_id TEXT, work_scope TEXT NOT NULL,
               major TEXT NOT NULL, minor TEXT NOT NULL, name TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
               status TEXT NOT NULL, planned_start TEXT, due_date TEXT, is_removed INTEGER NOT NULL DEFAULT 0,
-              assigned_member_user_id TEXT, sort_order INTEGER NOT NULL DEFAULT 0, row_version INTEGER NOT NULL DEFAULT 1,
+              assigned_member_user_id TEXT, created_by TEXT, work_kind TEXT NOT NULL DEFAULT 'CHECKLIST',
+              sort_order INTEGER NOT NULL DEFAULT 0, row_version INTEGER NOT NULL DEFAULT 1,
               updated_at TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS teams_v3_work_scope_idx ON teams_v3_work_items(work_scope,event_id,status,due_date);
@@ -54,6 +55,11 @@ class CompanyWorkspace:
             INSERT OR IGNORE INTO teams_v3_workspace(singleton) VALUES(1);
             """
         )
+        columns = {row["name"] for row in self.db.conn.execute("PRAGMA table_info(teams_v3_work_items)")}
+        if "created_by" not in columns:
+            self.db.conn.execute("ALTER TABLE teams_v3_work_items ADD COLUMN created_by TEXT")
+        if "work_kind" not in columns:
+            self.db.conn.execute("ALTER TABLE teams_v3_work_items ADD COLUMN work_kind TEXT NOT NULL DEFAULT 'CHECKLIST'")
         self.db.conn.commit()
 
     def cursor(self) -> int:
@@ -133,8 +139,10 @@ class CompanyWorkspace:
     def _upsert_work(self, item: dict[str, Any]) -> None:
         if not item.get("id"):
             return
-        values = (str(item["id"]), item.get("event_id"), str(item.get("work_scope") or "PROJECT"), str(item.get("major") or "기타"), str(item.get("minor") or "일반"), str(item.get("name") or ""), str(item.get("detail") or ""), str(item.get("status") or "미착수"), item.get("planned_start"), item.get("due_date"), int(bool(item.get("is_removed"))), item.get("assigned_member_user_id"), int(item.get("sort_order") or 0), int(item.get("row_version") or 1), str(item.get("updated_at") or ""))
-        self.db.conn.execute("INSERT INTO teams_v3_work_items(remote_id,event_id,work_scope,major,minor,name,detail,status,planned_start,due_date,is_removed,assigned_member_user_id,sort_order,row_version,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(remote_id) DO UPDATE SET event_id=excluded.event_id,work_scope=excluded.work_scope,major=excluded.major,minor=excluded.minor,name=excluded.name,detail=excluded.detail,status=excluded.status,planned_start=excluded.planned_start,due_date=excluded.due_date,is_removed=excluded.is_removed,assigned_member_user_id=excluded.assigned_member_user_id,sort_order=excluded.sort_order,row_version=excluded.row_version,updated_at=excluded.updated_at", values)
+        work_scope = str(item.get("work_scope") or "PROJECT")
+        work_kind = str(item.get("work_kind") or ("COMPANY_SELF" if work_scope == "COMPANY" else "CHECKLIST"))
+        values = (str(item["id"]), item.get("event_id"), work_scope, str(item.get("major") or "기타"), str(item.get("minor") or "일반"), str(item.get("name") or ""), str(item.get("detail") or ""), str(item.get("status") or "미착수"), item.get("planned_start"), item.get("due_date"), int(bool(item.get("is_removed"))), item.get("assigned_member_user_id"), item.get("created_by"), work_kind, int(item.get("sort_order") or 0), int(item.get("row_version") or 1), str(item.get("updated_at") or ""))
+        self.db.conn.execute("INSERT INTO teams_v3_work_items(remote_id,event_id,work_scope,major,minor,name,detail,status,planned_start,due_date,is_removed,assigned_member_user_id,created_by,work_kind,sort_order,row_version,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(remote_id) DO UPDATE SET event_id=excluded.event_id,work_scope=excluded.work_scope,major=excluded.major,minor=excluded.minor,name=excluded.name,detail=excluded.detail,status=excluded.status,planned_start=excluded.planned_start,due_date=excluded.due_date,is_removed=excluded.is_removed,assigned_member_user_id=excluded.assigned_member_user_id,created_by=excluded.created_by,work_kind=excluded.work_kind,sort_order=excluded.sort_order,row_version=excluded.row_version,updated_at=excluded.updated_at", values)
 
     def _upsert_finance(self, item: dict[str, Any]) -> None:
         if not item.get("id"):

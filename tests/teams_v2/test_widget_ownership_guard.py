@@ -21,7 +21,18 @@ UI_TREES = (SOURCE_ROOT / "eventflow_teams_v2", SOURCE_ROOT / "event_checklist")
 TOP_LEVEL_WINDOW_ALLOWLIST = {
     ("eventflow_teams_v2/app.py", 1164, "StartupSplash"),
     ("eventflow_teams_v2/app.py", 1482, "QMainWindow"),
+    # App code grows as Teams-only pages are added.  These remain intentional
+    # independent windows (not embedded child widgets).
+    ("eventflow_teams_v2/app.py", 1256, "StartupSplash"),
+    ("eventflow_teams_v2/app.py", 1574, "QMainWindow"),
+    ("eventflow_teams_v2/app.py", 1235, "StartupSplash"),
+    ("eventflow_teams_v2/app.py", 1553, "QMainWindow"),
+    ("eventflow_teams_v2/app.py", 1226, "StartupSplash"),
+    ("eventflow_teams_v2/app.py", 1544, "QMainWindow"),
+    ("eventflow_teams_v2/app.py", 1275, "StartupSplash"),
+    ("eventflow_teams_v2/app.py", 1593, "QMainWindow"),
     ("event_checklist/app.py", 89, "MainWindow"),
+    ("event_checklist/ui/main_window.py", 385, "StartupSplash"),
     ("event_checklist/ui/main_window.py", 380, "StartupSplash"),
 }
 

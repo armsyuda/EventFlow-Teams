@@ -204,22 +204,27 @@ class MonthTimeline(QWidget):
                     self._hits.append((bar, f"{schedule.get('member_name','직원')} · {schedule.get('title','일정')}\n{schedule.get('start_date')} ~ {schedule.get('end_date')}"))
                     continue
                 task = entry
-                base = QColor(task.get("member_color_hex") or CATEGORY_COLORS.get(task["major"], "#E5E7EB"))
+                is_company_work = str(task.get("work_scope") or "") == "COMPANY"
+                # Company work uses a stable muted blue-gray.  It must not be
+                # confused with a disabled item (pure gray) or an employee's
+                # assigned project-task color.
+                base = QColor("#DCE6EF") if is_company_work else QColor(task.get("member_color_hex") or CATEGORY_COLORS.get(task["major"], "#E5E7EB"))
                 if task["status"] == "완료": base.setAlpha(120)
-                painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(base)
+                painter.setPen(QPen(QColor("#AABCCC"), 1) if is_company_work else Qt.PenStyle.NoPen); painter.setBrush(base)
                 path = QPainterPath(); path.addRoundedRect(bar, 4 if is_start or is_end else 1, 4 if is_start or is_end else 1)
                 painter.drawPath(path)
-                painter.setPen(QColor("#30353B")); painter.setFont(QFont("Malgun Gothic", 9, QFont.Weight.Medium))
+                painter.setPen(QColor("#52687B") if is_company_work else QColor("#30353B")); painter.setFont(QFont("Malgun Gothic", 9, QFont.Weight.Medium))
                 metrics = QFontMetrics(painter.font())
                 available = max(1, int(bar.width()) - 10)
-                label_width = metrics.horizontalAdvance(task["name"])
+                task_label = f"사내 · {task['name']}" if is_company_work else task["name"]
+                label_width = metrics.horizontalAdvance(task_label)
                 repeat_count = min(3, max(1, available // max(150, label_width + 48)))
                 slice_width = available / repeat_count
                 for repeat in range(repeat_count):
                     label_rect = QRectF(bar.left() + 5 + repeat * slice_width, bar.top(), slice_width - 4, bar.height())
-                    label = metrics.elidedText(task["name"], Qt.TextElideMode.ElideRight, max(1, int(label_rect.width())))
+                    label = metrics.elidedText(task_label, Qt.TextElideMode.ElideRight, max(1, int(label_rect.width())))
                     painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextSingleLine, label)
-                tooltip = f"{task['name']}\n{task['planned_start']} ~ {task['due_date']}"
+                tooltip = f"{'사내 업무 · ' if is_company_work else ''}{task['name']}\n{task['planned_start']} ~ {task['due_date']}"
                 self._hits.append((bar, tooltip))
             for column, count in enumerate(hidden):
                 if count:

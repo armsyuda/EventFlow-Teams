@@ -27,10 +27,10 @@ from .sync_store import WorkspaceSnapshotStore
 from .sync_engine import WorkspaceSyncEngine
 from .realtime import RealtimeSignalClient
 from .outbox import WorkspaceOutbox
-from .staff_pages import EmployeeWorkPage, PersonalScheduleDialog
+from .staff_pages import EmployeeWorkPage
 from .my_space_page import MySpacePage
 from .company_workspace import CompanyWorkspace
-from .company_pages import CompanyWorkPage, CompanyCalendarPage, FinancePage
+from .company_pages import CompanyCalendarPage, FinancePage
 from .diagnostics import RuntimeWindowTrace
 
 
@@ -286,7 +286,7 @@ class CompanyMembersPage(QWidget):
         "VIEWER": {"dashboard.view","events.view","checklist.view","calendar.view","contacts.view","exports.use"},
     }
     permission_groups = {
-        "업무 화면": [("대시보드", ("dashboard.view",), ()), ("체크리스트", ("checklist.view",), ("checklist.edit", "checklist.assign", "checklist.structure")), ("달력", ("calendar.view",), ("calendar.edit",)), ("정산내역", ("settlement.view",), ("settlement.edit",))],
+        "업무 화면": [("대시보드", ("dashboard.view",), ()), ("체크리스트", ("checklist.view",), ("checklist.edit", "checklist.assign", "checklist.structure")), ("전체 달력", ("calendar.view",), ("calendar.edit",)), ("정산내역", ("settlement.view",), ("settlement.edit",))],
         "회사 데이터": [("기본 항목", ("master_items.view",), ("master_items.edit",)), ("업체·담당자", ("contacts.view",), ("contacts.edit",))],
     }
 
@@ -294,7 +294,7 @@ class CompanyMembersPage(QWidget):
         super().__init__(); self.api = api; self.organization = organization; self.members: list[dict] = []; self.selected_member: dict | None = None; self.permission_boxes: dict[str, QCheckBox] = {}; self.permission_rows: list[tuple[QCheckBox, QCheckBox | None, tuple[str, ...], tuple[str, ...]]] = []; self._updating_permissions = False; self._dirty = False
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 28); root.setSpacing(12)
         top = QHBoxLayout(); top.addWidget(QLabel("직원 및 권한", objectName="PageTitle")); top.addStretch(); self.back = QPushButton("← 회사 관리"); self.back.setProperty("quiet", True); self.refresh = QPushButton("새로고침"); self.refresh.setProperty("primary", True); top.addWidget(self.back); top.addWidget(self.refresh); root.addLayout(top)
-        root.addWidget(QLabel("왼쪽에서 직원을 선택한 뒤 역할과 화면별 조회·편집 권한을 정하세요. 편집을 허용하면 조회도 함께 허용됩니다.", objectName="PageDescription"))
+        root.addWidget(QLabel("왼쪽에서 직원을 선택한 뒤 역할과 화면별 조회·편집 권한을 정하세요. 편집을 허용하면 조회도 함께 허용됩니다. ‘회사에서 삭제’는 계정과 업무 이력은 남기고 이 회사 접근만 즉시 중지합니다.", objectName="PageDescription"))
         self.message = QLabel(""); root.addWidget(self.message)
         content = QHBoxLayout(); content.setSpacing(16); root.addLayout(content, 1)
         self.table = QTableWidget(0, 3); self.table.setObjectName("TeamsMemberTable"); self.table.setHorizontalHeaderLabels(["직원", "역할", "접근 상태"]); self.table.horizontalHeader().setStretchLastSection(True); self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers); self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection); self.table.setStyleSheet("QTableWidget#TeamsMemberTable::item:selected { background:#FCE8DE; color:#172033; border-top:1px solid #F15A24; border-bottom:1px solid #F15A24; } QTableWidget#TeamsMemberTable::item:selected:!active { background:#FCE8DE; color:#172033; }"); self.table.setMaximumWidth(480); content.addWidget(self.table, 1)
@@ -330,8 +330,8 @@ class CompanyMembersPage(QWidget):
             section_layout.addLayout(grid); detail_layout.addWidget(section)
         export_section = QFrame(); export_section.setObjectName("TeamsPermissionSection"); export_section.setStyleSheet("QFrame#TeamsPermissionSection { background:#FAFAFB; border:1px solid #E3E5E8; border-radius:10px; } QLabel#SectionTitle { border:none; }")
         export_layout = QHBoxLayout(export_section); export_layout.setContentsMargins(16, 13, 16, 13); export_layout.addWidget(QLabel("출력", objectName="SectionTitle")); export_layout.addStretch(); self.export_box = QCheckBox("PDF·Excel 출력 허용"); self.permission_boxes["exports.use"] = self.export_box; export_layout.addWidget(self.export_box); detail_layout.addWidget(export_section)
-        detail_layout.addStretch(); self.apply = QPushButton("변경사항 저장"); self.apply.setProperty("primary", True); self.apply.setEnabled(False); detail_layout.addWidget(self.apply)
-        self.back.clicked.connect(self.back_requested); self.refresh.clicked.connect(self.load); self.table.cellClicked.connect(self._select_row); self.role.currentIndexChanged.connect(self._role_changed); self.status.currentIndexChanged.connect(self._mark_dirty); self.export_box.toggled.connect(self._mark_dirty); self.apply.clicked.connect(self.apply_changes)
+        detail_layout.addStretch(); actions = QHBoxLayout(); self.remove = QPushButton("회사에서 삭제"); self.remove.setProperty("danger", True); self.remove.setEnabled(False); self.apply = QPushButton("변경사항 저장"); self.apply.setProperty("primary", True); self.apply.setEnabled(False); actions.addWidget(self.remove); actions.addStretch(); actions.addWidget(self.apply); detail_layout.addLayout(actions)
+        self.back.clicked.connect(self.back_requested); self.refresh.clicked.connect(self.load); self.table.cellClicked.connect(self._select_row); self.role.currentIndexChanged.connect(self._role_changed); self.status.currentIndexChanged.connect(self._mark_dirty); self.export_box.toggled.connect(self._mark_dirty); self.apply.clicked.connect(self.apply_changes); self.remove.clicked.connect(self.remove_member)
 
     def load(self) -> None:
         self.refresh.setEnabled(False); self.message.setText("직원 목록을 불러오는 중…")
@@ -367,7 +367,10 @@ class CompanyMembersPage(QWidget):
         self.export_box.setChecked(overrides.get("exports.use") == "ALLOW" or ("exports.use" in defaults and overrides.get("exports.use") != "DENY"))
         self._updating_permissions = False; self._dirty = False
         locked = role == "OWNER" and self.organization.role != "OWNER"
+        current_user_id = getattr(getattr(self.api, "session", None), "user_id", None)
+        can_remove = role != "OWNER" and member.get("status") == "ACTIVE" and str(member.get("user_id")) != str(current_user_id)
         self.role.setEnabled(not locked); self.status.setEnabled(not locked); self.apply.setEnabled(False)
+        self.remove.setEnabled(can_remove); self.remove.setToolTip("회사 소유자와 본인 계정은 회사에서 삭제할 수 없습니다." if not can_remove else "계정과 업무 이력은 보존하고 이 회사 접근만 중지합니다.")
         for box in set(self.permission_boxes.values()): box.setEnabled(not locked)
         self.notice.setText("회사 소유자는 소유자만 변경할 수 있습니다." if locked else "프로젝트 참여자·백업·직원 관리는 역할에 따라 자동 적용됩니다.")
         self.save_state.setText("저장된 변경사항이 없습니다." if not locked else "회사 소유자 권한은 소유자만 바꿀 수 있습니다.")
@@ -398,6 +401,32 @@ class CompanyMembersPage(QWidget):
         self.load()
         self.save_state.setText("서버 저장 완료 · 대상 직원에게 권한 변경 알림을 보냈습니다.")
         self.message.setText(f"{saved_name}님의 역할과 메뉴 권한을 서버에 저장했습니다.")
+
+    def remove_member(self) -> None:
+        if not self.selected_member:
+            return
+        member = self.selected_member
+        if str(member.get("role")) == "OWNER":
+            QMessageBox.warning(self, "회사에서 삭제", "회사 소유자는 다른 직원에게 소유자 권한을 넘긴 뒤에만 삭제할 수 있습니다.")
+            return
+        name = str(member.get("display_name") or member.get("email") or "이 직원")
+        confirmation = QMessageBox.question(
+            self,
+            "회사에서 삭제",
+            f"{name}님을 이 회사에서 삭제할까요?\n\n계정과 기존 업무 이력은 남지만, 이 회사의 Teams와 데이터 접근은 즉시 중지됩니다.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmation != QMessageBox.StandardButton.Yes:
+            return
+        self.remove.setEnabled(False); self.message.setText("회사 접근을 중지하는 중…")
+        try:
+            self.api.remove_company_member(self.organization.id, str(member["user_id"]))
+        except ApiError as exc:
+            self.message.setText(str(exc)); self.remove.setEnabled(True); return
+        self.selected_member = None
+        self.load()
+        self.message.setText(f"{name}님을 회사에서 삭제했습니다. 계정과 기존 업무 이력은 보존됩니다.")
 
     def _mark_dirty(self, *_args) -> None:
         if self._updating_permissions or not self.selected_member:
@@ -528,7 +557,7 @@ class TeamsV2Window(QMainWindow):
         self.local_window: MainWindow | None = None; self.current_organization: Organization | None = None; self.permission_worker: Worker | None = None; self.snapshot_worker: Worker | None = None; self.changes_worker: Worker | None = None; self.access_refresh_worker: Worker | None = None; self.sync_engine: WorkspaceSyncEngine | None = None; self.realtime: RealtimeSignalClient | None = None; self._sync_workers: list[Worker] = []; self._opened_cursor = ""; self._opened_with_pending = False
         self.update_info: UpdateInfo | None = None; self.update_progress: StartupSplash | None = None; self.update_check_worker: Worker | None = None; self.update_download_worker: Worker | None = None
         self.company_management_page: CompanyManagementPage | None = None; self.company_members_page: CompanyMembersPage | None = None; self.guest_management_page: GuestManagementPage | None = None
-        self.company_workspace: CompanyWorkspace | None = None; self.company_work_page: CompanyWorkPage | None = None; self.company_calendar_page: CompanyCalendarPage | None = None; self.company_finance_page: FinancePage | None = None; self.company_v3_buttons: list[QPushButton] = []; self.v3_worker: Worker | None = None; self.v3_mutation_inflight = False; self._v3_initial_open = False
+        self.company_workspace: CompanyWorkspace | None = None; self.company_calendar_page: CompanyCalendarPage | None = None; self.company_finance_page: FinancePage | None = None; self.company_v3_buttons: list[QPushButton] = []; self.v3_worker: Worker | None = None; self.v3_mutation_inflight = False; self._v3_initial_open = False
         self.v3_outbox_timer = QTimer(self); self.v3_outbox_timer.setInterval(1200); self.v3_outbox_timer.timeout.connect(self._flush_v3_outbox); self.v3_outbox_timer.start()
         self.setWindowTitle("이벤트 플로우 Teams V2"); self.setWindowIcon(app_icon()); self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint); self.resize(1440, 900); self.setMinimumSize(1120, 700)
         outer = QWidget(); outer.setObjectName("AppRoot"); outer_layout = QVBoxLayout(outer); outer_layout.setContentsMargins(1, 1, 1, 1); outer_layout.setSpacing(0)
@@ -606,11 +635,10 @@ class TeamsV2Window(QMainWindow):
             self.workspace_db.conn.commit()
         staff_page = EmployeeWorkPage(self.workspace_db, local.open_teams_task, self.api.session.user_id, organization.role in {"OWNER", "ADMIN"}, self._transfer_task_member, self._refresh_staff_directory, local)
         local.install_teams_staff_page(staff_page)
-        self.my_space_page = MySpacePage(self.workspace_db, self.api.session.user_id, self._save_personal_schedule_values, self._edit_personal_schedule, self._delete_personal_schedule, self._reorder_my_schedules, self._reorder_my_tasks, self._save_my_task_details, local)
+        self.my_space_page = MySpacePage(self.workspace_db, self.api.session.user_id, self._save_personal_schedule_values, self._delete_personal_schedule, self._reorder_my_schedules, self._reorder_my_tasks, self._save_my_task_details, self._save_my_company_work, self._delete_my_company_work, self._save_my_project_work, self._delete_my_project_work, self._claim_my_checklist_work, organization.role != "GUEST", local)
         local.stack.addWidget(self.my_space_page)
         my_button = QPushButton("나의 공간"); local.add_company_global_nav_button(my_button)
         my_button.clicked.connect(lambda: self._show_v3_page(self.my_space_page, my_button))
-        local.calendar.configure_personal_schedules(self.api.session.user_id, self._edit_personal_schedule)
         local.events.set_staff_assignment_handler(self._assign_task_member)
         local.events.finance_button.hide()
 
@@ -619,6 +647,7 @@ class TeamsV2Window(QMainWindow):
         if not self.workspace_db:
             return
         self.company_workspace = CompanyWorkspace(self.workspace_db)
+        local.hide_project_calendar_for_teams()
         self.company_calendar_page = CompanyCalendarPage(self.workspace_db, local)
         local.stack.addWidget(self.company_calendar_page)
         calendar_button = QPushButton("전체 달력"); calendar_button.setToolTip("모든 프로젝트 업무와 개인 일정을 표시합니다.")
@@ -740,7 +769,6 @@ class TeamsV2Window(QMainWindow):
             return
         outcome = self.company_workspace.apply_mutation_response(entry, value)
         if outcome == "APPLIED":
-            if self.company_work_page: self.company_work_page.refresh()
             if self.company_calendar_page: self.company_calendar_page.refresh()
             if self.company_finance_page: self.company_finance_page.refresh()
             if hasattr(self, "my_space_page"): self.my_space_page.refresh()
@@ -755,39 +783,30 @@ class TeamsV2Window(QMainWindow):
             self.company_workspace.record_transport_failure(entry, message or "서버 연결을 확인할 수 없습니다.")
         self._show_toast("회사 전체 업무 변경을 오프라인 대기열에 보관했습니다.")
 
-    def _edit_personal_schedule(self, schedule) -> None:
-        if not self.current_organization or not self.workspace_db or not self.local_window:
-            return
-        dialog = PersonalScheduleDialog(schedule if isinstance(schedule, dict) else None, self.local_window)
-        if not dialog.exec():
-            return
-        values = dialog.values()
-        self._save_personal_schedule_values(values, str(schedule.get("id")) if isinstance(schedule, dict) and schedule.get("id") else None)
-
     def _save_personal_schedule_values(self, values: dict, schedule_id: str | None = None) -> bool:
         if not self.current_organization or not self.workspace_db or not self.local_window:
             return False
         try:
             saved = self.api.save_personal_schedule(self.current_organization.id, schedule_id, values["start_date"], values["end_date"], values["title"], values.get("content", ""))
             WorkspaceSnapshotStore(self.workspace_db)._upsert_personal_schedule(saved)
-            self.workspace_db.conn.commit(); self.local_window.calendar.refresh()
+            self.workspace_db.conn.commit()
             if hasattr(self, "company_calendar_page"): self.company_calendar_page.refresh()
             if hasattr(self, "my_space_page"): self.my_space_page.refresh()
             return True
         except ApiError as exc:
             QMessageBox.warning(self.local_window, "개인 일정 저장 실패", str(exc)); return False
 
-    def _delete_personal_schedule(self, schedule: dict) -> None:
+    def _delete_personal_schedule(self, schedule: dict) -> bool:
         if not self.current_organization or not self.workspace_db or not self.local_window:
-            return
-        if QMessageBox.question(self.local_window, "개인 일정 삭제", f"‘{schedule.get('title', '')}’ 일정을 삭제할까요?") != QMessageBox.StandardButton.Yes:
-            return
+            return False
         try:
             self.api.delete_personal_schedule(self.current_organization.id, str(schedule["id"]))
-            self.workspace_db.conn.execute("DELETE FROM teams_v2_personal_schedules WHERE id=?", (str(schedule["id"]),)); self.workspace_db.conn.commit(); self.local_window.calendar.refresh()
+            self.workspace_db.conn.execute("DELETE FROM teams_v2_personal_schedules WHERE id=?", (str(schedule["id"]),)); self.workspace_db.conn.commit()
             if hasattr(self, "my_space_page"): self.my_space_page.refresh()
+            self._show_toast("개인 일정을 삭제했습니다.")
+            return True
         except ApiError as exc:
-            QMessageBox.warning(self.local_window, "개인 일정 삭제 실패", str(exc))
+            QMessageBox.warning(self.local_window, "개인 일정 삭제 실패", str(exc)); return False
 
     def _reorder_my_schedules(self, schedule_ids: list[str]) -> None:
         if not self.current_organization or not self.workspace_db:
@@ -819,6 +838,101 @@ class TeamsV2Window(QMainWindow):
         self._queue_v3("WORK_PATCH", {"id": task_id, "expected_row_version": int(task["row_version"] or 0), **values})
         return True
 
+    def _save_my_company_work(self, values: dict, work: dict | None) -> bool:
+        """Persist one employee's company work without opening assignment controls."""
+        if not self.current_organization or not self.workspace_db or not self.company_workspace:
+            return False
+        try:
+            response = self.api.save_my_company_work(
+                self.current_organization.id,
+                str(work["remote_id"]) if work else None,
+                int(work["row_version"] or 0) if work else None,
+                values,
+            )
+            if str(response.get("status") or "") == "CONFLICT":
+                self._show_toast("다른 변경이 먼저 저장되었습니다. 목록을 새로고침했습니다.")
+                self._load_v3_workspace(); return False
+            saved = response.get("entity")
+            if not isinstance(saved, dict) or str(response.get("status") or "") != "APPLIED":
+                raise ApiError(str(response.get("reason") or "사내 업무를 저장하지 못했습니다."))
+            self.company_workspace.apply_changes({"cursor": self.company_workspace.cursor(), "changes": [{"entity_type": "WORK_ITEM", "entity_key": str(saved.get("id") or ""), "operation": "UPSERT", "payload": saved}]})
+            if self.company_calendar_page: self.company_calendar_page.refresh()
+            if self.local_window and hasattr(self.local_window, "staff_work_page"): self.local_window.staff_work_page.refresh()
+            if hasattr(self, "my_space_page"): self.my_space_page.refresh()
+            self._show_toast("사내 업무를 저장했습니다.")
+            return True
+        except ApiError as exc:
+            QMessageBox.warning(self.local_window, "사내 업무 저장", str(exc)); return False
+
+    def _delete_my_company_work(self, work: dict) -> bool:
+        if not self.current_organization or not self.workspace_db or not self.company_workspace:
+            return False
+        try:
+            response = self.api.delete_my_company_work(self.current_organization.id, str(work["remote_id"]), int(work["row_version"] or 0))
+            if str(response.get("status") or "") == "CONFLICT":
+                self._show_toast("다른 변경이 먼저 저장되었습니다. 목록을 새로고침했습니다.")
+                self._load_v3_workspace(); return False
+            saved = response.get("entity")
+            if not isinstance(saved, dict) or str(response.get("status") or "") != "APPLIED":
+                raise ApiError(str(response.get("reason") or "사내 업무를 삭제하지 못했습니다."))
+            self.company_workspace.apply_changes({"cursor": self.company_workspace.cursor(), "changes": [{"entity_type": "WORK_ITEM", "entity_key": str(saved.get("id") or ""), "operation": "UPSERT", "payload": saved}]})
+            if self.company_calendar_page: self.company_calendar_page.refresh()
+            if self.local_window and hasattr(self.local_window, "staff_work_page"): self.local_window.staff_work_page.refresh()
+            if hasattr(self, "my_space_page"): self.my_space_page.refresh()
+            self._show_toast("사내 업무를 삭제했습니다.")
+            return True
+        except ApiError as exc:
+            QMessageBox.warning(self.local_window, "사내 업무 삭제", str(exc)); return False
+
+    def _save_my_project_work(self, values: dict, work: dict | None) -> bool:
+        """Persist a member's self-owned project addition, never a checklist copy."""
+        if not self.current_organization or not self.workspace_db or not self.company_workspace:
+            return False
+        event_id = str((work or {}).get("event_id") or "")
+        if not event_id:
+            event_id = str(values.pop("event_id", "") or "")
+        if not event_id:
+            return False
+        try:
+            response = self.api.save_my_project_work(self.current_organization.id, str(work["remote_id"]) if work else None, int(work["row_version"] or 0) if work else None, event_id, values)
+            return self._apply_my_space_work_response(response, "프로젝트 추가 업무", "저장")
+        except ApiError as exc:
+            QMessageBox.warning(self.local_window, "프로젝트 추가 업무 저장", str(exc)); return False
+
+    def _delete_my_project_work(self, work: dict) -> bool:
+        if not self.current_organization or not self.workspace_db or not self.company_workspace:
+            return False
+        try:
+            response = self.api.delete_my_project_work(self.current_organization.id, str(work["remote_id"]), int(work["row_version"] or 0))
+            return self._apply_my_space_work_response(response, "프로젝트 추가 업무", "삭제")
+        except ApiError as exc:
+            QMessageBox.warning(self.local_window, "프로젝트 추가 업무 삭제", str(exc)); return False
+
+    def _claim_my_checklist_work(self, checklist: dict) -> bool:
+        if not self.current_organization or not self.workspace_db or not self.company_workspace:
+            return False
+        try:
+            response = self.api.claim_my_checklist_work(self.current_organization.id, str(checklist["id"]), int(checklist["row_version"] or 0))
+            return self._apply_my_space_work_response(response, "체크리스트 업무", "연결")
+        except ApiError as exc:
+            QMessageBox.warning(self.local_window, "체크리스트 업무 연결", str(exc)); return False
+
+    def _apply_my_space_work_response(self, response: dict, label: str, action: str) -> bool:
+        if not self.company_workspace:
+            return False
+        if str(response.get("status") or "") == "CONFLICT":
+            self._show_toast("다른 변경이 먼저 저장되었습니다. 목록을 새로고침했습니다.")
+            self._load_v3_workspace(); return False
+        saved = response.get("entity")
+        if not isinstance(saved, dict) or str(response.get("status") or "") != "APPLIED":
+            raise ApiError(str(response.get("reason") or f"{label}을 {action}하지 못했습니다."))
+        self.company_workspace.apply_changes({"cursor": self.company_workspace.cursor(), "changes": [{"entity_type": "WORK_ITEM", "entity_key": str(saved.get("id") or ""), "operation": "UPSERT", "payload": saved}]})
+        if self.company_calendar_page: self.company_calendar_page.refresh()
+        if self.local_window and hasattr(self.local_window, "staff_work_page"): self.local_window.staff_work_page.refresh()
+        if hasattr(self, "my_space_page"): self.my_space_page.refresh()
+        self._show_toast(f"{label}을 {action}했습니다.")
+        return True
+
     def _open_v3_task(self, remote_task_id: str) -> None:
         if not self.workspace_db or not self.local_window:
             return
@@ -842,7 +956,6 @@ class TeamsV2Window(QMainWindow):
                 saved = self.api.transfer_task_member(self.current_organization.id, str(task_id), str(member_user_id), int(task["row_version"] or 0))
                 self.company_workspace.apply_changes({"cursor": self.company_workspace.cursor(), "changes": [{"entity_type": "WORK_ITEM", "entity_key": str(task_id), "operation": "UPSERT", "payload": saved}]})
                 if self.local_window and hasattr(self.local_window, "staff_work_page"): self.local_window.staff_work_page.refresh()
-                if self.company_work_page: self.company_work_page.refresh()
                 if self.company_calendar_page: self.company_calendar_page.refresh()
                 return True
             except ApiError as exc:
@@ -1000,8 +1113,6 @@ class TeamsV2Window(QMainWindow):
                 button.setVisible(global_visible)
             else:
                 button.setVisible(global_visible and "settlement.view" in permissions)
-        if self.company_work_page:
-            self.company_work_page.configure_access("checklist.structure" in permissions)
         if self.local_window:
             self.local_window.events.finance_button.hide()
         if self.company_finance_page:
@@ -1208,7 +1319,7 @@ class TeamsV2Window(QMainWindow):
             self.local_window.deleteLater()
             self.local_window = None
         self.company_management_page = None; self.company_members_page = None; self.guest_management_page = None
-        self.company_workspace = None; self.company_work_page = None; self.company_calendar_page = None; self.company_finance_page = None; self.v3_worker = None; self.v3_mutation_inflight = False; self._v3_initial_open = False
+        self.company_workspace = None; self.company_calendar_page = None; self.company_finance_page = None; self.v3_worker = None; self.v3_mutation_inflight = False; self._v3_initial_open = False
         if self.workspace_db:
             self.workspace_db.close(); self.workspace_db = None
         self.current_organization = None

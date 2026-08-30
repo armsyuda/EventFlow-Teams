@@ -3,11 +3,14 @@ import time
 from unittest.mock import Mock
 
 from PySide6.QtCore import QEvent, QObject, Qt
-from PySide6.QtWidgets import QApplication, QPushButton, QTableWidgetItem, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTableWidgetItem, QWidget
 
 from eventflow_teams_v2.api import Organization
 from eventflow_teams_v2.app import _update_health_file
 from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, OrganizationPage, TeamsV2Window
+from eventflow_teams_v2.company_pages import CompanyCalendarPage
+from eventflow_teams_v2.company_workspace import CompanyWorkspace
+from eventflow_teams_v2.my_space_page import MySpacePage
 from eventflow_teams_v2.staff_pages import EmployeeWorkPage
 from eventflow_teams_v2.config import TeamsV2Config
 from eventflow_teams_v2.session import Session
@@ -84,6 +87,35 @@ def test_company_permission_editor_requires_explicit_save_and_uses_atomic_api() 
     page.deleteLater()
 
 
+def test_company_member_removal_requires_confirmation_and_preserves_the_account(monkeypatch) -> None:
+    QApplication.instance() or QApplication([])
+    api = Mock(); api.session = Session("token", "refresh", "owner")
+    page = CompanyMembersPage(api, Organization("org", "회사", "OWNER"))
+    member = {"user_id": "member", "display_name": "직원", "email": "member@example.com", "role": "MEMBER", "status": "ACTIVE", "overrides": []}
+    page.members = [member]; api.company_members.return_value = []
+    page.table.setRowCount(1); page._select_row(0, 0)
+
+    assert page.remove.isEnabled()
+    assert "업무 이력" in page.remove.toolTip()
+    monkeypatch.setattr(QMessageBox, "question", lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes)
+    page.remove_member()
+
+    api.remove_company_member.assert_called_once_with("org", "member")
+    assert "계정과 기존 업무 이력은 보존" in page.message.text()
+    page.deleteLater()
+
+
+def test_company_member_removal_never_enables_for_an_owner() -> None:
+    QApplication.instance() or QApplication([])
+    api = Mock(); api.session = Session("token", "refresh", "owner")
+    page = CompanyMembersPage(api, Organization("org", "회사", "OWNER"))
+    page.members = [{"user_id": "owner-b", "display_name": "대표", "email": "owner@example.com", "role": "OWNER", "status": "ACTIVE", "overrides": []}]
+    page.table.setRowCount(1); page._select_row(0, 0)
+
+    assert not page.remove.isEnabled()
+    page.deleteLater()
+
+
 def test_company_selection_uses_one_direct_button_per_company() -> None:
     QApplication.instance() or QApplication([])
     page = OrganizationPage(Mock())
@@ -153,6 +185,80 @@ def test_company_management_shows_selectable_join_code_and_copies_it() -> None:
     page.deleteLater()
 
 
+def test_company_calendar_hides_personal_schedules_for_a_selected_project(tmp_path: Path) -> None:
+    QApplication.instance() or QApplication([])
+    database = WorkspaceDatabase(workspace_database_path(tmp_path, "user-a", "org-a"), user_id="user-a", organization_id="org-a")
+    CompanyWorkspace(database)
+    event_id = database.conn.execute(
+        "INSERT INTO events(name,start_date) VALUES(?,?)", ("선택 프로젝트", "2026-08-01")
+    ).lastrowid
+    database.conn.execute(
+        "INSERT INTO teams_v2_entity_map(entity_type,local_id,remote_id) VALUES('EVENT',?,?)", (event_id, "project-a")
+    )
+    database.conn.execute(
+        "INSERT INTO teams_v3_work_items(remote_id,event_id,work_scope,major,minor,name,status,planned_start,due_date) VALUES(?,?,?,?,?,?,?,?,?)",
+        ("work-a", "project-a", "PROJECT", "운영", "일반", "프로젝트 업무", "미착수", "2026-08-10", "2026-08-11"),
+    )
+    database.conn.execute(
+        "INSERT INTO teams_v2_personal_schedules(id,member_user_id,start_date,end_date,title) VALUES(?,?,?,?,?)",
+        ("personal-a", "staff-a", "2026-08-10", "2026-08-11", "개인 휴가"),
+    )
+    database.conn.commit()
+    page = CompanyCalendarPage(database)
+
+    assert [schedule["title"] for schedule in page.timeline.personal_schedules] == ["개인 휴가"]
+    page.project.setCurrentIndex(page.project.findData("project-a"))
+
+    assert [task["name"] for task in page.timeline.tasks] == ["프로젝트 업무"]
+    assert page.timeline.personal_schedules == []
+    assert not page.personal.isEnabled()
+    assert page.personal.text() == "개인 일정 제외"
+
+    page.project.setCurrentIndex(page.project.findData("__COMPANY__"))
+    assert [schedule["title"] for schedule in page.timeline.personal_schedules] == ["개인 휴가"]
+    assert page.personal.isEnabled()
+    page.deleteLater(); database.close()
+
+
+def test_my_space_unifies_company_and_project_work_without_a_duplicate_work_list(tmp_path: Path) -> None:
+    QApplication.instance() or QApplication([])
+    database = WorkspaceDatabase(workspace_database_path(tmp_path, "user-a", "org-a"), user_id="user-a", organization_id="org-a")
+    CompanyWorkspace(database)
+    database.conn.executemany(
+        "INSERT INTO teams_v3_work_items(remote_id,event_id,work_scope,work_kind,major,minor,name,status,planned_start,due_date,assigned_member_user_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            ("company-own", None, "COMPANY", "COMPANY_SELF", "사내 업무", "일반", "내 사내 업무", "미착수", "2026-08-10", "2026-08-11", "user-a", "user-a"),
+            ("company-other", None, "COMPANY", "COMPANY_SELF", "사내 업무", "일반", "동료 사내 업무", "진행중", "2026-08-10", "2026-08-11", "user-b", "user-b"),
+            ("project-work", "project-a", "PROJECT", "PROJECT_ADDITIONAL", "프로젝트 추가 업무", "일반", "프로젝트 업무", "미착수", "2026-08-10", "2026-08-11", "user-a", "user-a"),
+        ],
+    )
+    database.conn.commit()
+    page = MySpacePage(
+        database, "user-a", lambda _values, _schedule_id=None: True, lambda _item: True,
+        lambda _items: None, lambda _items: None, lambda _id, _values: True,
+        lambda _values, _work: True, lambda _work: True,
+        lambda _values, _work: True, lambda _work: True, lambda _checklist: True,
+    )
+    page.refresh()
+
+    assert page.management_stack.currentWidget() is page.work_panel
+    page.schedule_tab.click()
+    assert page.management_stack.currentWidget() is page.schedule_panel
+    page.work_tab.click()
+    assert page.management_stack.currentWidget() is page.work_panel
+    task_labels = [label.text() for label in page.tasks.findChildren(QLabel)]
+    assert "내 사내 업무" in task_labels and "동료 사내 업무" not in task_labels
+    assert "프로젝트 업무" in task_labels
+    assert not hasattr(page, "company_work")
+    assert not hasattr(page, "company_category")
+    assert [page.checklist_scope.text(), page.project_scope.text(), page.company_scope.text()] == ["체크리스트 업무", "프로젝트 추가 업무", "사내 업무"]
+    page.checklist_scope.click()
+    assert not page.project_field.isHidden() and not page.checklist_field.isHidden() and page.work_details.isHidden()
+    page.company_scope.click()
+    assert page.project_field.isHidden() and page.checklist_field.isHidden() and not page.work_details.isHidden()
+    page.deleteLater(); database.close()
+
+
 def test_company_selection_opens_local_ui_against_v2_workspace(tmp_path: Path, monkeypatch) -> None:
     app = QApplication.instance() or QApplication([])
     config = TeamsV2Config("https://example.supabase.co", "publishable", tmp_path)
@@ -180,6 +286,11 @@ def test_company_selection_opens_local_ui_against_v2_workspace(tmp_path: Path, m
     assert window.local_window.parentWidget() is window.stack
     assert window.local_window.windowType() == Qt.WindowType.Widget
     assert window.local_window not in QApplication.topLevelWidgets()
+    assert window.local_window.nav_buttons[2].text() == "달력"
+    assert window.local_window.nav_buttons[2].isHidden()
+    assert window.company_calendar_page is not None
+    assert not any(button.text() == "사내 업무" and button.property("nav") for button in window.local_window.findChildren(QPushButton))
+    assert any(button.text() == "전체 달력" and not button.isHidden() for button in window.local_window.findChildren(QPushButton))
     assert window.sync_text.text() == "동기화 완료"
     assert not hasattr(window, "company_text")
     assert not hasattr(window, "account_menu")

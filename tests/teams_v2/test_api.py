@@ -105,3 +105,47 @@ def test_v2_company_join_code_uses_administrator_rpc(tmp_path: Path, monkeypatch
 
     assert api.company_join_code("org") == "A2B3C"
     assert calls == [("https://example.supabase.co/rest/v1/rpc/teams_v2_company_join_code", {"target_organization_id": "org"})]
+
+
+def test_v2_company_member_removal_uses_the_access_stop_rpc(tmp_path: Path, monkeypatch) -> None:
+    calls = []
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs["json"])); return _Response({"removed": True, "access_status": "SUSPENDED"})
+
+    monkeypatch.setattr("eventflow_teams_v2.api.requests.post", post)
+    api = TeamsV2Api(TeamsV2Config("https://example.supabase.co", "publishable", tmp_path), Session("token", "refresh", "owner"))
+
+    api.remove_company_member("org", "former-member")
+
+    assert calls == [("https://example.supabase.co/rest/v1/rpc/teams_v2_remove_company_member", {"target_organization_id": "org", "target_user_id": "former-member"})]
+
+
+def test_v3_my_space_work_uses_self_owned_rpcs(tmp_path: Path, monkeypatch) -> None:
+    responses = iter([
+        _Response({"status": "APPLIED", "entity": {"id": "work-a"}}),
+        _Response({"status": "APPLIED", "entity": {"id": "work-a", "is_removed": True}}),
+        _Response({"status": "APPLIED", "entity": {"id": "work-b"}}),
+        _Response({"status": "APPLIED", "entity": {"id": "work-b", "is_removed": True}}),
+        _Response({"status": "APPLIED", "entity": {"id": "check-a"}}),
+    ])
+    calls = []
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs["json"])); return next(responses)
+
+    monkeypatch.setattr("eventflow_teams_v2.api.requests.post", post)
+    api = TeamsV2Api(TeamsV2Config("https://example.supabase.co", "publishable", tmp_path), Session("token", "refresh", "user"))
+
+    assert api.save_my_company_work("org", None, None, {"name": "문서 정리"})["entity"]["id"] == "work-a"
+    assert api.delete_my_company_work("org", "work-a", 2)["entity"]["is_removed"] is True
+    assert api.save_my_project_work("org", None, None, "event-a", {"name": "현장 확인"})["entity"]["id"] == "work-b"
+    assert api.delete_my_project_work("org", "work-b", 3)["entity"]["is_removed"] is True
+    assert api.claim_my_checklist_work("org", "check-a", 4)["entity"]["id"] == "check-a"
+    assert calls == [
+        ("https://example.supabase.co/rest/v1/rpc/teams_v3_save_my_company_work", {"target_organization_id": "org", "target_task_id": None, "expected_row_version": None, "work": {"name": "문서 정리"}}),
+        ("https://example.supabase.co/rest/v1/rpc/teams_v3_delete_my_company_work", {"target_organization_id": "org", "target_task_id": "work-a", "expected_row_version": 2}),
+        ("https://example.supabase.co/rest/v1/rpc/teams_v3_save_my_project_work", {"target_organization_id": "org", "target_task_id": None, "expected_row_version": None, "target_event_id": "event-a", "work": {"name": "현장 확인"}}),
+        ("https://example.supabase.co/rest/v1/rpc/teams_v3_delete_my_project_work", {"target_organization_id": "org", "target_task_id": "work-b", "expected_row_version": 3}),
+        ("https://example.supabase.co/rest/v1/rpc/teams_v3_claim_my_checklist_work", {"target_organization_id": "org", "target_task_id": "check-a", "expected_row_version": 4}),
+    ]

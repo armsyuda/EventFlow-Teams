@@ -76,7 +76,7 @@ class EmployeeWorkPage(QWidget):
         super().__init__(parent); self.db = db; self.open_task = open_task; self.current_user_id = current_user_id; self.can_transfer = can_transfer; self.on_transfer = on_transfer; self.on_refresh_staff = on_refresh_staff
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 32); root.setSpacing(12)
         root.addWidget(QLabel("직원업무", objectName="PageTitle"))
-        root.addWidget(QLabel("동료가 맡은 진행 업무를 확인합니다. 개인 일정은 이 화면에 표시되지 않습니다.", objectName="PageDescription"))
+        root.addWidget(QLabel("직원별 프로젝트·사내 업무를 확인합니다. 개인 일정은 이 화면에 표시되지 않습니다.", objectName="PageDescription"))
         filters = QHBoxLayout(); filters.addWidget(QLabel("업무 범위")); self.project_filter = QComboBox(); self.project_filter.currentIndexChanged.connect(self.refresh); filters.addWidget(self.project_filter); filters.addStretch(); self.refresh_button = QPushButton("직원 목록 새로고침"); self.refresh_button.setProperty("quiet", True); self.refresh_button.clicked.connect(self._refresh_staff); filters.addWidget(self.refresh_button); root.addLayout(filters)
         self.scroll = StaffHorizontalScroll(); self.scroll.setObjectName("StaffWorkScroll"); self.scroll.setWidgetResizable(True); self.scroll.setFrameShape(QFrame.Shape.NoFrame); self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn); self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setStyleSheet("QScrollArea#StaffWorkScroll{background:#F7F8FA;border:1px solid #E5E7EB;border-radius:12px;} QScrollArea#StaffWorkScroll > QWidget > QWidget{background:#F7F8FA;} QScrollBar:horizontal{height:18px;background:#E8EDF3;border-radius:9px;margin:5px 16px 7px 16px;} QScrollBar::handle:horizontal{min-width:110px;background:#98A2B3;border-radius:8px;} QScrollBar::handle:horizontal:hover{background:#667085;} QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal{width:0px;}")
@@ -85,7 +85,7 @@ class EmployeeWorkPage(QWidget):
         self.scroll.setWidget(self.container); root.addWidget(self.scroll, 1)
 
     def refresh(self) -> None:
-        previous_project = self.project_filter.currentData(); self.project_filter.blockSignals(True); self.project_filter.clear(); self.project_filter.addItem("전체 업무", "")
+        previous_project = self.project_filter.currentData(); self.project_filter.blockSignals(True); self.project_filter.clear(); self.project_filter.addItem("전체 업무", ""); self.project_filter.addItem("사내 업무", "__COMPANY__")
         for event in self.db.query("SELECT remote_id,name FROM teams_v2_entity_map map JOIN events e ON e.id=map.local_id WHERE map.entity_type='EVENT' ORDER BY e.name"):
             self.project_filter.addItem(str(event["name"]), str(event["remote_id"]))
         self.project_filter.setCurrentIndex(max(0, self.project_filter.findData(previous_project))); self.project_filter.blockSignals(False)
@@ -151,21 +151,26 @@ class EmployeeWorkPage(QWidget):
         self.refresh()
 
     def _task_card(self, task):
-        return WorkTaskCard(task, self.open_task, self.can_transfer)
+        # A company-work item is self-owned by policy.  Even managers must
+        # not drag it onto another employee's card as a forced assignment.
+        return WorkTaskCard(task, self.open_task, self.can_transfer and str(task["work_scope"] or "") != "COMPANY")
 
     def _member_work(self, user_id: str, *, completed: bool):
         """Prefer the V3 mirror so a colleague's cross-project work is visible."""
         try:
             condition = "w.status='완료'" if completed else "w.status NOT IN ('완료','해당없음')"
-            scope = self.project_filter.currentData() if hasattr(self, "project_filter") else ""; filter_sql = " AND w.event_id=?" if scope else ""; args = (user_id, scope) if scope else (user_id,)
-            return self.db.query(f"""SELECT w.remote_id id,w.name,w.major,w.status,w.due_date,
-                COALESCE(e.name,CASE WHEN w.work_scope='COMPANY' THEN '프로젝트 외' ELSE '프로젝트' END) event_name
+            scope = self.project_filter.currentData() if hasattr(self, "project_filter") else ""
+            if scope == "__COMPANY__": filter_sql, args = " AND w.work_scope='COMPANY'", (user_id,)
+            elif scope: filter_sql, args = " AND w.event_id=?", (user_id, scope)
+            else: filter_sql, args = "", (user_id,)
+            return self.db.query(f"""SELECT w.remote_id id,w.name,w.major,w.status,w.due_date,w.work_scope,
+                COALESCE(e.name,CASE WHEN w.work_scope='COMPANY' THEN '사내 업무' ELSE '프로젝트' END) event_name
                 FROM teams_v3_work_items w LEFT JOIN teams_v2_entity_map map ON map.entity_type='EVENT' AND map.remote_id=w.event_id
                 LEFT JOIN events e ON e.id=map.local_id WHERE w.assigned_member_user_id=? AND w.is_removed=0 AND {condition}{filter_sql}
                 ORDER BY COALESCE(w.due_date,'9999-12-31'),w.sort_order""", args)
         except Exception:
             condition = "t.status='완료'" if completed else "t.status NOT IN ('완료','해당없음')"
-            return self.db.query(f"""SELECT t.id,t.name,t.major,t.status,t.due_date,e.name event_name FROM event_tasks t
+            return self.db.query(f"""SELECT t.id,t.name,t.major,t.status,t.due_date,t.work_scope,e.name event_name FROM event_tasks t
                 JOIN events e ON e.id=t.event_id WHERE t.assigned_member_user_id=? AND t.is_removed=0 AND {condition}
                 ORDER BY COALESCE(t.due_date,'9999-12-31'),t.sort_order""", (user_id,))
 

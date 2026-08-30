@@ -6,8 +6,8 @@ import calendar
 from datetime import date
 from typing import Callable
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtCore import QDate, Qt
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSplitter, QTextEdit, QVBoxLayout, QWidget
 from event_checklist.ui.month_timeline import MonthTimeline
 from event_checklist.theme import status_color
 from event_checklist.ui.calendar_page import CATEGORY_CARD_BORDERS
@@ -24,65 +24,74 @@ def _project_name(db, event_id: str | None) -> str:
 
 
 class CompanyWorkPage(QWidget):
-    def __init__(self, db, create_work: Callable[[dict], None], open_project: Callable[[str], None] | None = None, parent=None):
-        super().__init__(parent); self.db = db; self.create_work = create_work; self.open_project = open_project; self.can_edit = False
+    """Self-managed company work, deliberately separate from project checklists."""
+
+    def __init__(self, db, user_id: str, save_work: Callable[[dict, dict | None], bool], delete_work: Callable[[dict], bool], parent=None):
+        super().__init__(parent); self.db = db; self.user_id = str(user_id); self.save_work = save_work; self.delete_work = delete_work; self.can_register = False
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 32); root.setSpacing(12)
-        top = QHBoxLayout(); copy = QVBoxLayout(); copy.addWidget(QLabel("전체 업무", objectName="PageTitle")); copy.addWidget(QLabel("모든 프로젝트 업무와 프로젝트 외 업무를 한 곳에서 확인합니다.", objectName="PageDescription")); top.addLayout(copy, 1)
-        self.add_button = QPushButton("업무 추가"); self.add_button.clicked.connect(self._add); top.addWidget(self.add_button); root.addLayout(top)
-        filters = QHBoxLayout(); self.project = QComboBox(); self.member = QComboBox(); self.project.currentIndexChanged.connect(self.refresh); self.member.currentIndexChanged.connect(self.refresh); self.status = QComboBox(); self.status.addItems(["전체 상태", "미착수", "진행중", "확인요청", "완료", "보류", "해당없음"]); self.status.currentIndexChanged.connect(self.refresh); filters.addWidget(QLabel("프로젝트")); filters.addWidget(self.project); filters.addSpacing(12); filters.addWidget(QLabel("담당자")); filters.addWidget(self.member); filters.addSpacing(12); filters.addWidget(QLabel("상태")); filters.addWidget(self.status); filters.addStretch(); root.addLayout(filters)
+        top = QHBoxLayout(); copy = QVBoxLayout(); copy.addWidget(QLabel("사내 업무", objectName="PageTitle")); copy.addWidget(QLabel("프로젝트와 무관한 업무를 직접 등록해 일정과 내 업무에 함께 표시합니다.", objectName="PageDescription")); top.addLayout(copy, 1)
+        self.add_button = QPushButton("+ 사내 업무 등록"); self.add_button.clicked.connect(self._add); top.addWidget(self.add_button); root.addLayout(top)
+        filters = QHBoxLayout(); self.owner = QComboBox(); self.owner.addItem("전체 사내 업무", ""); self.owner.addItem("내 사내 업무", self.user_id); self.status = QComboBox(); self.status.addItem("진행 중", "ACTIVE"); self.status.addItem("전체 상태", ""); self.status.addItems(["미착수", "진행중", "확인요청", "보류", "완료"]); self.owner.currentIndexChanged.connect(self.refresh); self.status.currentIndexChanged.connect(self.refresh); filters.addWidget(QLabel("보기")); filters.addWidget(self.owner); filters.addSpacing(12); filters.addWidget(QLabel("상태")); filters.addWidget(self.status); filters.addStretch(); root.addLayout(filters)
         self.scroll = QScrollArea(); self.scroll.setObjectName("CompanyWorkScroll"); self.scroll.setWidgetResizable(True); self.scroll.setFrameShape(QFrame.Shape.NoFrame); self.scroll.setStyleSheet("QScrollArea#CompanyWorkScroll{background:#F7F8FA;border:none;} QScrollArea#CompanyWorkScroll > QWidget > QWidget{background:#F7F8FA;}"); self.canvas = QWidget(); self.canvas.setObjectName("CompanyWorkCanvas"); self.canvas.setStyleSheet("QWidget#CompanyWorkCanvas{background:#F7F8FA;}"); self.rows = QVBoxLayout(self.canvas); self.rows.setContentsMargins(0, 0, 0, 0); self.rows.setSpacing(7); self.rows.setAlignment(Qt.AlignmentFlag.AlignTop); self.scroll.setWidget(self.canvas); root.addWidget(self.scroll, 1)
 
     def refresh(self) -> None:
-        current, current_member = self.project.currentData(), self.member.currentData()
-        self.project.blockSignals(True); self.member.blockSignals(True); self.project.clear(); self.member.clear(); self.project.addItem("전체 프로젝트", "") ; self.project.addItem("프로젝트 외", "__COMPANY__")
-        for row in self.db.query("SELECT remote_id,name FROM teams_v2_entity_map m JOIN events e ON e.id=m.local_id WHERE m.entity_type='EVENT' ORDER BY e.name"):
-            self.project.addItem(str(row["name"]), str(row["remote_id"]))
-        found = self.project.findData(current)
-        self.project.setCurrentIndex(found if found >= 0 else 0); self.project.blockSignals(False)
-        self.member.addItem("전체 직원", "")
-        try:
-            for member in self.db.query("SELECT user_id,display_name,job_title FROM teams_v2_staff_members WHERE status='ACTIVE' ORDER BY display_name,user_id"):
-                label = str(member["display_name"] or member["user_id"])
-                if member["job_title"]: label += f" · {member['job_title']}"
-                self.member.addItem(label, str(member["user_id"]))
-        except Exception: pass
-        self.member.setCurrentIndex(max(0, self.member.findData(current_member))); self.member.blockSignals(False)
         while self.rows.count():
             item = self.rows.takeAt(0)
             if item.widget(): item.widget().deleteLater()
-        clauses = ["is_removed=0"]; args: list[object] = []
-        selected = self.project.currentData()
-        if selected == "__COMPANY__": clauses.append("work_scope='COMPANY'")
-        elif selected: clauses.append("event_id=?"); args.append(selected)
-        if self.member.currentData(): clauses.append("assigned_member_user_id=?"); args.append(self.member.currentData())
-        if self.status.currentIndex() > 0: clauses.append("status=?"); args.append(self.status.currentText())
-        work = self.db.query("SELECT * FROM teams_v3_work_items WHERE " + " AND ".join(clauses) + " ORDER BY CASE work_scope WHEN 'COMPANY' THEN 0 ELSE 1 END, COALESCE(due_date,'9999-12-31'),sort_order,name", tuple(args))
+        clauses = ["is_removed=0", "work_scope='COMPANY'"]; args: list[object] = []
+        if self.owner.currentData(): clauses.append("assigned_member_user_id=?"); args.append(self.owner.currentData())
+        if self.status.currentData() == "ACTIVE": clauses.append("status NOT IN ('완료','해당없음')")
+        elif self.status.currentData(): clauses.append("status=?"); args.append(self.status.currentData())
+        work = self.db.query("SELECT * FROM teams_v3_work_items WHERE " + " AND ".join(clauses) + " ORDER BY status='완료', COALESCE(due_date,'9999-12-31'),sort_order,name", tuple(args))
         for item in work:
             row = QFrame(); row.setObjectName("CompanyWorkRow"); row.setStyleSheet("QFrame#CompanyWorkRow{background:white;border:1px solid #E2E8F0;border-radius:9px;}")
             layout = QHBoxLayout(row); layout.setContentsMargins(16, 10, 16, 10); layout.setSpacing(14)
-            layout.addWidget(QLabel(_project_name(self.db, item["event_id"]), objectName="Muted"), 1)
-            layout.addWidget(QLabel(f"{item['major']} · {item['minor']}"), 1)
+            layout.addWidget(QLabel("사내 업무", objectName="Muted"), 1)
+            layout.addWidget(QLabel(str(item["major"] or "사내 업무")), 1)
             layout.addWidget(QLabel(str(item["name"])), 3)
             layout.addWidget(QLabel(str(item["status"])), 1)
-            layout.addWidget(QLabel(str(item["due_date"] or "마감일 미입력"), objectName="Muted"), 1)
-            if item["event_id"] and self.open_project:
-                open_button = QPushButton("프로젝트 열기"); open_button.setProperty("compact", True); open_button.clicked.connect(lambda _checked=False, event_id=str(item["event_id"]): self.open_project(event_id)); layout.addWidget(open_button)
+            layout.addWidget(QLabel(f"{item['planned_start'] or '시작일 미입력'} ~ {item['due_date'] or '마감일 미입력'}", objectName="Muted"), 2)
+            if str(item["assigned_member_user_id"] or "") == self.user_id:
+                edit = QPushButton("수정"); edit.setProperty("compact", True); edit.clicked.connect(lambda _checked=False, work=dict(item): self._edit(work)); layout.addWidget(edit)
+                delete = QPushButton("삭제"); delete.setProperty("compact", True); delete.clicked.connect(lambda _checked=False, work=dict(item): self._delete(work)); layout.addWidget(delete)
             self.rows.addWidget(row)
-        if not work: self.rows.addWidget(QLabel("표시할 업무가 없습니다.", objectName="EmptyState"))
+        if not work: self.rows.addWidget(QLabel("표시할 사내 업무가 없습니다.", objectName="EmptyState"))
 
-    def configure_access(self, can_edit: bool) -> None:
-        self.can_edit = can_edit; self.add_button.setVisible(can_edit)
+    def configure_access(self, can_register: bool) -> None:
+        self.can_register = can_register; self.add_button.setVisible(can_register)
 
     def _add(self) -> None:
-        if not self.can_edit:
+        if not self.can_register:
             return
-        dialog = QDialog(self); dialog.setWindowTitle("회사 전체 업무 추가"); form = QFormLayout(dialog); scope = QComboBox(); scope.addItem("프로젝트 외", "COMPANY")
-        for row in self.db.query("SELECT remote_id,name FROM teams_v2_entity_map m JOIN events e ON e.id=m.local_id WHERE m.entity_type='EVENT' ORDER BY e.name"): scope.addItem(str(row["name"]), str(row["remote_id"]))
-        name = QLineEdit(); major = QLineEdit("회사 운영"); minor = QLineEdit("기타"); form.addRow("프로젝트", scope); form.addRow("업무명", name); form.addRow("대분류", major); form.addRow("중분류", minor); buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel); form.addRow(buttons); buttons.rejected.connect(dialog.reject)
+        self._edit(None)
+
+    @staticmethod
+    def _date_edit(value: object | None = None) -> QDateEdit:
+        editor = QDateEdit(); editor.setCalendarPopup(True); editor.setDisplayFormat("yyyy-MM-dd")
+        editor.setDate(QDate.fromString(str(value or date.today().isoformat()), "yyyy-MM-dd"))
+        return editor
+
+    def _edit(self, work: dict | None) -> None:
+        if work is not None and str(work.get("assigned_member_user_id") or "") != self.user_id:
+            return
+        dialog = QDialog(self); dialog.setWindowTitle("사내 업무 수정" if work else "사내 업무 등록"); dialog.setMinimumWidth(460)
+        form = QFormLayout(dialog); name = QLineEdit(str((work or {}).get("name") or "")); name.setMaxLength(160)
+        category = QLineEdit(str((work or {}).get("major") or "사내 업무")); category.setMaxLength(60)
+        status = QComboBox(); status.addItems(["미착수", "진행중", "확인요청", "보류", "완료"]); status.setCurrentText(str((work or {}).get("status") or "미착수"))
+        start = self._date_edit((work or {}).get("planned_start")); due = self._date_edit((work or {}).get("due_date")); note = QTextEdit(str((work or {}).get("detail") or "")); note.setMaximumHeight(110)
+        guide = QLabel("담당자는 등록한 본인으로 고정됩니다. 시작일과 마감일이 있어야 전체 달력에 표시됩니다.", objectName="InfoGuide")
+        form.addRow("업무명", name); form.addRow("분류", category); form.addRow("상태", status); form.addRow("시작일", start); form.addRow("마감일", due); form.addRow("메모 (선택)", note); form.addRow(guide)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel); form.addRow(buttons); buttons.rejected.connect(dialog.reject)
         def accept() -> None:
-            if not name.text().strip(): return
-            event = scope.currentData(); self.create_work({"work_scope": "COMPANY" if event == "COMPANY" else "PROJECT", "event_id": "" if event == "COMPANY" else event, "name": name.text().strip(), "major": major.text().strip() or "회사 운영", "minor": minor.text().strip() or "기타"}); dialog.accept()
+            if not name.text().strip(): guide.setText("업무명을 입력하세요."); return
+            if due.date() < start.date(): guide.setText("마감일은 시작일보다 빠를 수 없습니다."); return
+            values = {"name": name.text().strip(), "major": category.text().strip() or "사내 업무", "status": status.currentText(), "planned_start": start.date().toString("yyyy-MM-dd"), "due_date": due.date().toString("yyyy-MM-dd"), "detail": note.toPlainText().strip()}
+            if self.save_work(values, work): dialog.accept()
         buttons.accepted.connect(accept); dialog.exec()
+
+    def _delete(self, work: dict) -> None:
+        if QMessageBox.question(self, "사내 업무 삭제", f"‘{work.get('name') or '이 업무'}’를 삭제할까요?") == QMessageBox.StandardButton.Yes:
+            self.delete_work(work)
 
 
 class FinancePage(QWidget):
@@ -189,18 +198,18 @@ class FinancePage(QWidget):
 class CompanyCalendarPage(QWidget):
     """Whole-company calendar backed only by the V3 mirror.
 
-    The Local `CalendarPage` remains the selected-project calendar.  Keeping
-    this separate avoids making an old project-only service silently return
-    company work.
+    Teams exposes this as its only calendar. A project selection is a filter
+    on this page, rather than a project-specific calendar screen.
     """
     def __init__(self, db, parent=None):
         super().__init__(parent); self.db = db
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 32); root.setSpacing(12)
-        title_row = QHBoxLayout(); title_row.setSpacing(14); title_row.addWidget(QLabel("전체 달력", objectName="PageTitle")); description = QLabel("모든 프로젝트 업무와 프로젝트 외 업무를 표시합니다.", objectName="PageDescription"); title_row.addWidget(description, 0, Qt.AlignmentFlag.AlignBottom); title_row.addStretch(); root.addLayout(title_row)
+        title_row = QHBoxLayout(); title_row.setSpacing(14); title_row.addWidget(QLabel("전체 달력", objectName="PageTitle")); description = QLabel("전체 프로젝트와 사내 업무를 표시합니다. 프로젝트를 선택하면 해당 프로젝트 업무만 표시합니다.", objectName="PageDescription"); title_row.addWidget(description, 0, Qt.AlignmentFlag.AlignBottom); title_row.addStretch(); root.addLayout(title_row)
         filters = QHBoxLayout(); filters.setSpacing(10); self.project = QComboBox(); self.member = QComboBox(); self.personal = QCheckBox("개인 일정 표시"); self.personal.setChecked(True)
+        self._personal_schedule_preference = True
         for item in (self.project, self.member): item.currentIndexChanged.connect(self.refresh)
         self.previous = QPushButton("‹"); self.next = QPushButton("›"); self.month = QLabel(objectName="SectionTitle"); self.month.setMinimumWidth(124); self.month.setAlignment(Qt.AlignmentFlag.AlignCenter); self.previous.setToolTip("이전 달"); self.next.setToolTip("다음 달")
-        self.personal.toggled.connect(self.refresh); self.previous.clicked.connect(lambda: self._shift(-1)); self.next.clicked.connect(lambda: self._shift(1))
+        self.personal.toggled.connect(self._remember_personal_schedule_preference); self.personal.toggled.connect(self.refresh); self.previous.clicked.connect(lambda: self._shift(-1)); self.next.clicked.connect(lambda: self._shift(1))
         filters.addWidget(self.previous); filters.addWidget(self.month); filters.addWidget(self.next); filters.addSpacing(18); filters.addWidget(QLabel("프로젝트")); filters.addWidget(self.project); filters.addSpacing(12); filters.addWidget(QLabel("직원")); filters.addWidget(self.member); filters.addSpacing(10); filters.addWidget(self.personal); filters.addStretch()
         self.list_toggle = QPushButton("일정 목록 숨기기"); self.list_toggle.setProperty("compact", True); self.list_toggle.clicked.connect(self._toggle_list); filters.addWidget(self.list_toggle); root.addLayout(filters)
         split = QSplitter(Qt.Orientation.Horizontal); self.timeline = MonthTimeline(); self.timeline.date_selected.connect(self._selected); split.addWidget(self.timeline)
@@ -219,7 +228,7 @@ class CompanyCalendarPage(QWidget):
 
     def _load_filters(self) -> None:
         selected_project, selected_member = self.project.currentData(), self.member.currentData()
-        self.project.blockSignals(True); self.member.blockSignals(True); self.project.clear(); self.member.clear(); self.project.addItem("전체 프로젝트", ""); self.project.addItem("프로젝트 외", "__COMPANY__")
+        self.project.blockSignals(True); self.member.blockSignals(True); self.project.clear(); self.member.clear(); self.project.addItem("전체 프로젝트", ""); self.project.addItem("사내 업무", "__COMPANY__")
         for row in self.db.query("SELECT remote_id,name FROM teams_v2_entity_map m JOIN events e ON e.id=m.local_id WHERE m.entity_type='EVENT' ORDER BY e.name"): self.project.addItem(str(row["name"]), str(row["remote_id"]))
         self.member.addItem("전체 직원", "")
         try:
@@ -227,9 +236,34 @@ class CompanyCalendarPage(QWidget):
         except Exception: pass
         self.project.setCurrentIndex(max(0, self.project.findData(selected_project))); self.member.setCurrentIndex(max(0, self.member.findData(selected_member))); self.project.blockSignals(False); self.member.blockSignals(False)
 
+    def _remember_personal_schedule_preference(self, checked: bool) -> None:
+        """Retain the user's whole-company calendar preference between filters."""
+        if self.personal.isEnabled():
+            self._personal_schedule_preference = checked
+
+    def _update_personal_schedule_filter(self, project: object) -> bool:
+        """A selected project must never be mixed with unrelated personal time."""
+        selected_project = bool(project) and project != "__COMPANY__"
+        self.personal.blockSignals(True)
+        if selected_project:
+            if self.personal.isEnabled():
+                self._personal_schedule_preference = self.personal.isChecked()
+            self.personal.setChecked(False)
+            self.personal.setText("개인 일정 제외")
+            self.personal.setToolTip("프로젝트를 선택한 상태에서는 해당 프로젝트 업무만 표시합니다.")
+            self.personal.setEnabled(False)
+        else:
+            self.personal.setText("개인 일정 표시")
+            self.personal.setToolTip("전체 프로젝트와 사내 업무 보기에서 개인 일정을 함께 표시합니다.")
+            self.personal.setEnabled(True)
+            self.personal.setChecked(self._personal_schedule_preference)
+        self.personal.blockSignals(False)
+        return selected_project
+
     def refresh(self) -> None:
         self._load_filters(); self.month.setText(f"{self.timeline.year}년 {self.timeline.month}월")
         clauses = ["is_removed=0", "planned_start IS NOT NULL", "due_date IS NOT NULL"]; args: list[object] = []; project = self.project.currentData(); member = self.member.currentData()
+        selected_project = self._update_personal_schedule_filter(project)
         if project == "__COMPANY__": clauses.append("work_scope='COMPANY'")
         elif project: clauses.append("event_id=?"); args.append(project)
         if member: clauses.append("assigned_member_user_id=?"); args.append(member)
@@ -240,7 +274,7 @@ class CompanyCalendarPage(QWidget):
         except Exception: pass
         self.timeline.set_tasks(tasks)
         schedules: list[dict] = []
-        if self.personal.isChecked():
+        if self.personal.isChecked() and not selected_project:
             try:
                 rows = self.db.query("SELECT s.*,m.display_name member_name,m.color_hex FROM teams_v2_personal_schedules s LEFT JOIN teams_v2_staff_members m ON m.user_id=s.member_user_id")
                 schedules = [dict(row) for row in rows if not member or str(row["member_user_id"]) == str(member)]
@@ -265,8 +299,11 @@ class CompanyCalendarPage(QWidget):
             item = QListWidgetItem(); item.setSizeHint(item.sizeHint().__class__(0, 54)); self.list.addItem(item); empty = QFrame(); empty.setStyleSheet("QFrame{background:#FFFFFF;border:1px dashed #CBD5E1;border-radius:10px;}"); line = QHBoxLayout(empty); line.addWidget(QLabel("이 날짜에 일정이 없습니다.", objectName="Muted")); self.list.setItemWidget(item, empty)
 
     def _task_card(self, task: dict) -> QFrame:
-        card = QFrame(); card.setObjectName("CalendarTaskCard"); border = str(task.get("member_color_hex") or CATEGORY_CARD_BORDERS.get(str(task.get("major") or ""), "#D9DCE1")); card.setStyleSheet(f"QFrame#CalendarTaskCard{{background:#FFFFFF;border:1px solid {border};border-radius:10px;}}")
-        layout = QVBoxLayout(card); layout.setContentsMargins(10, 7, 10, 7); layout.setSpacing(3); top = QHBoxLayout(); top.addWidget(QLabel(f"{_project_name(self.db, task.get('event_id'))} · {task.get('major') or '미분류'}", objectName="Muted"), 1); status = QLabel(str(task.get("status") or "미착수")); foreground, background = status_color(str(task.get("status") or "미착수")); status.setStyleSheet(f"color:{foreground};background:{background};border-radius:8px;padding:1px 7px;"); top.addWidget(status); layout.addLayout(top); layout.addWidget(QLabel(str(task.get("name") or "업무"), objectName="CalendarTaskName")); return card
+        is_company_work = str(task.get("work_scope") or "") == "COMPANY"
+        border = "#AABCCC" if is_company_work else str(task.get("member_color_hex") or CATEGORY_CARD_BORDERS.get(str(task.get("major") or ""), "#D9DCE1"))
+        card = QFrame(); card.setObjectName("CalendarTaskCard"); card.setStyleSheet(f"QFrame#CalendarTaskCard{{background:#FFFFFF;border:1px solid {border};border-radius:10px;}}")
+        scope = "사내 업무" if is_company_work else _project_name(self.db, task.get("event_id"))
+        layout = QVBoxLayout(card); layout.setContentsMargins(10, 7, 10, 7); layout.setSpacing(3); top = QHBoxLayout(); top.addWidget(QLabel(f"{scope} · {task.get('major') or '미분류'}", objectName="Muted"), 1); status = QLabel(str(task.get("status") or "미착수")); foreground, background = status_color(str(task.get("status") or "미착수")); status.setStyleSheet(f"color:{foreground};background:{background};border-radius:8px;padding:1px 7px;"); top.addWidget(status); layout.addLayout(top); layout.addWidget(QLabel(str(task.get("name") or "업무"), objectName="CalendarTaskName")); return card
 
     def _schedule_card(self, schedule: dict) -> QFrame:
         card = QFrame(); card.setObjectName("CalendarTaskCard"); color = str(schedule.get("color_hex") or "#A7D4F0"); card.setStyleSheet(f"QFrame#CalendarTaskCard{{background:#FFFFFF;border:1px solid {color};border-radius:10px;}}")

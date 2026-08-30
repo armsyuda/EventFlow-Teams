@@ -129,3 +129,55 @@
 - `tests/local/test_update_service.py`에 남아 있던 과거 Local 제품의 `EventFlow.exe`·`EventFlow-Windows.zip`·별도 검토 설치 흐름 기대값은 Teams 실행 경로에 쓰이지 않아 제거했다.
 - 실제 Teams 업데이트에 필요한 Release 조회, ZIP 무결성 확인, 설치 폴더 marker, 업데이트 health/rollback 검사는 `tests/teams_v2/test_update_service.py`로 옮겨 `EventFlowTeams` 기준으로 유지했다. 이 검사는 태그 공개 시 GitHub Actions도 실행한다.
 - 검증: 전체 Pytest 172건, Python compileall, 공백 검사 통과.
+
+## 2026-08-30 회사에서 삭제
+
+- 회사 관리의 직원·권한 화면에 `회사에서 삭제` 버튼과 확인창을 추가했다. 이 기능은 계정·기존 업무 담당 이력·개인 데이터를 물리적으로 지우지 않고 회사 소속을 `SUSPENDED`로 바꿔 Teams 및 회사 데이터 접근을 즉시 중지한다. 회사 소유자와 현재 로그인한 본인 계정은 버튼으로 삭제할 수 없다.
+- Teams API는 `teams_v2_remove_company_member`만 호출한다. 서버가 OWNER/ADMIN 권한, 대상의 실제 소속, 본인 삭제 금지, OWNER 이전 후 삭제 조건을 재검사하고 권한 변경 알림 및 access signal로 실행 중인 대상 앱을 회사 선택 화면으로 돌려보낸다.
+- 검증: 관련 Teams API/화면 검사 20건 및 Python compileall 통과. 전체 Pytest는 174건 통과·1건 실패이며, 실패한 `test_widget_ownership_guard`는 기존 `app.py`의 update/startup `show()` 두 곳을 지적하는 이번 변경과 무관한 정적 검사다. 새 `release/EventFlowTeams/EventFlowTeams.exe`(SHA-256 `D0028C64E6ED6D73D5A8238689728FA7C8EF77B89F99FF4AF72ED94DC0D0E24D`)는 8초 숨김 기동 후 health `ok`를 확인했다. GitHub Release·자동 업데이트는 생성하지 않았다.
+
+## 2026-08-30 전체 달력 프로젝트 필터
+
+- 전체 달력의 프로젝트 선택은 이제 선택한 프로젝트 업무만 표시한다. 개인일정은 `전체 프로젝트`와 `프로젝트 외` 보기에서만 표시하며, 특정 프로젝트가 선택되면 개인일정 표시 제어는 `개인 일정 제외` 상태로 잠겨 다른 프로젝트와 무관한 일정이 섞이지 않는다.
+- 전체 보기에서 사용자가 고른 개인일정 표시/숨김 설정은 프로젝트 필터를 해제하면 그대로 복원된다.
+- 검증: `tests/teams_v2/test_app_shell.py` 14건과 Teams V2 Python compileall 통과. 이후 실행 파일을 재생성하고 `--update-health-file` 기동 검사를 통과했다.
+
+## 2026-08-30 Teams 단일 달력
+
+- Teams에서는 회사 전체 `전체 달력`만 남긴다. 기존 공용(Local) 프로젝트별 `달력` 메뉴는 Teams 내비게이션에서 숨기고, 권한 관리 문구도 `전체 달력`으로 통일했다.
+- 프로젝트만 볼 때는 별도 화면으로 이동하지 않고 전체 달력의 프로젝트 필터를 사용한다. 공용 `CalendarPage` 코드는 별도 Local 프로그램 기능이므로 삭제하지 않으며 Teams에서는 접근할 수 없다.
+- 검증: Teams 관련 화면·권한 검사 17건과 compileall 통과. 새 `release\\EventFlowTeams\\EventFlowTeams.exe`는 SHA-256 `C3E04389D8F45BBD92B7CFD2EE7EFBCE7CFCAA0D4C69F7FBB8EA4DD5004F320B`이며 숨김 기동 후 health `ok`를 확인했다. 전체 Teams Pytest는 54건 통과·1건 실패인데, 실패는 기존 창 표시 정적검사가 이미 있던 update/startup `show()` 세 곳을 지적한 것으로 이번 달력 변경과 무관하다.
+
+## 2026-08-30 사내 업무
+
+- Teams의 기존 미연결 `전체 업무` 초안을 `사내 업무` 화면으로 교체해 전 직원이 프로젝트와 무관한 업무를 직접 등록할 수 있게 했다. 사내 업무에는 업무명·분류·시작일·마감일·상태·메모를 사용하며, 요청/수락이나 타 직원 강제 할당은 없다.
+- 서버 RPC `teams_v3_save_my_company_work` / `teams_v3_delete_my_company_work`은 ACTIVE 비게스트 직원인지 확인한 뒤 작성자와 담당자를 `auth.uid()`로 고정한다. 수정·삭제도 작성자 본인만 할 수 있고, 날짜 누락·역전·상태값·본문 길이를 서버에서 검사한다. 운영 Supabase 마이그레이션 `20260830160000_teams_self_company_work.sql`을 적용했다.
+- 사내 업무는 직원업무 카드와 나의 공간에 포함되지만, 직원 카드에서는 다른 사람에게 끌어 이관할 수 없다. 전체 달력에서는 채움 `#DCE6EF`, 테두리·글자 `#AABCCC`/`#52687B`, `사내 ·` 라벨로 표시하고 완료 항목은 반투명으로 보인다. 개인 일정은 기존의 직원색 외곽선 표시를 유지한다.
+- 검증: 사내 업무 API/화면 회귀를 포함한 Teams Pytest 57건, Python compileall, 공백 검사를 통과했다. 새 `release\\EventFlowTeams\\EventFlowTeams.exe`(SHA-256 `96A999ADE69CDB3E33A53C55CFF0E5B7E5BDF4CBA8C2A1B3DC53B59CD3DD2F42`)는 격리된 사용자 데이터 환경에서 숨김 기동 후 `--update-health-file`에 `ok`를 기록했다. 공개 Release·자동 업데이트는 사용자 승인 전까지 만들지 않는다.
+
+## 2026-08-30 사내 업무 메뉴 단순화
+
+- 별도 `사내 업무` 전역 메뉴와 전체 목록 화면은 제거했다. 사내 업무는 개인이 직접 관리하는 성격이므로 `나의 공간` 오른쪽 상단의 `내 사내 업무`에서 등록·수정·삭제한다.
+- `나의 공간` 왼쪽의 우선순위 목록은 프로젝트 업무만 보이게 했고, 사내 업무는 개인 일정과 함께 오른쪽에서 명확히 분리했다. `직원업무`는 모든 직원의 업무 현황을 유지하되, `전체 업무`·`사내 업무`·프로젝트별 범위를 선택할 수 있다.
+- 기존 서버 소유권 규칙과 전체 달력의 사내 업무 색상·필터는 유지한다. 메뉴 위치만 바뀌므로 운영 Supabase 마이그레이션은 추가로 필요하지 않다.
+- 검증: Teams Pytest 57건, Python compileall, 공백 검사를 통과했다. 새 `release\\EventFlowTeams\\EventFlowTeams.exe`의 SHA-256은 `49C550739261E8C047034B3A909F0E53EA5BC04AA9790BE842660D807307D1A1`이며, 격리 환경의 숨김 기동에서 update health `ok`를 확인했다. 공개 Release·자동 업데이트는 만들지 않았다.
+
+## 2026-08-30 나의 공간 개인 관리 탭
+
+- 사내 업무 목록과 개인 일정 등록을 세로로 동시에 표시해 입력칸이 잘리던 구성을 제거했다. 나의 공간 오른쪽은 `사내 업무`·`개인 일정` 두 탭으로 전환하며, 기본 탭은 사내 업무다.
+- 두 탭은 같은 입력폼·등록 항목 목록 틀을 재사용한다. 선택한 탭 안에서 즉시 등록하고, `수정`을 누르면 같은 입력칸에 값을 불러온 뒤 저장한다. 개인 일정과 사내 업무의 등록/수정에 별도 모달을 열지 않는다. 삭제는 실수 방지를 위해 버튼이 `정말 삭제`로 한 번 더 바뀐 뒤 실행된다.
+- 사내 업무는 업무명·분류·시작/마감일·상태·메모를, 개인 일정은 제목·시작/종료일·설명을 입력한다. 항목 목록은 선택된 탭만 보여 고정 높이에서 UI가 겹치지 않는다.
+- 검증: 실제 Qt 렌더에서 기본 사내 업무 탭의 입력폼·목록이 한 영역 안에 표시되는 것을 확인했고, Teams Pytest 57건·Python compileall·공백 검사를 통과했다. 새 `release\\EventFlowTeams\\EventFlowTeams.exe`의 SHA-256은 `07017F7B7668E5BA05452866FAAE899D77D4ED39B6E5C0DF6B77737C96DE9594`이며, 격리 환경의 숨김 기동에서 update health `ok`를 확인했다. 공개 Release·자동 업데이트는 만들지 않았다.
+
+## 2026-08-30 나의 공간 통합 업무 등록
+
+- 나의 공간의 기본 탭을 `업무`로 바꾸고, 기존 `분류: 사내 업무`와 업무 탭 아래의 중복 `등록된 항목` 목록을 제거했다. 개인 일정 탭의 일정 목록은 일정 수정·정렬용으로 유지한다.
+- 업무 등록은 `체크리스트 업무` / `프로젝트 추가 업무` / `사내 업무` 세 선택지로 나뉜다. 체크리스트 업무는 프로젝트를 먼저 고른 뒤 공식 체크리스트 항목을 선택해 원본에 본인을 담당자로 연결하며, 새 업무를 복사하지 않는다. 다른 직원에게 이미 배정된 항목은 목록에서 식별하고 연결을 차단한다.
+- 프로젝트 추가 업무는 체크리스트에 없는 일을 선택한 프로젝트에만 개인 소유로 만든다. 사내 업무는 프로젝트 없이 만든다. 두 개인 등록 업무는 작성자·담당자가 같은 본인일 때만 나의 공간에서 수정·삭제할 수 있다. 좌측은 `내 업무 우선순위`로 변경해 체크리스트·프로젝트 추가·사내 업무를 한 목록으로 표시하며, 프로젝트명 또는 업무 종류 표지로 구분한다.
+- Teams 로컬 작업본은 서버의 `work_kind`(`CHECKLIST`/`PROJECT_ADDITIONAL`/`COMPANY_SELF`)와 작성자를 동기화한다. 새 업무 화면은 내용 높이만 차지하도록 고정해, 중복 목록 제거 뒤 입력 카드가 화면 전체로 늘어나지 않는다.
+- 검증: Teams Pytest 57건, Python compileall, 공백 검사를 통과했다. 오프스크린 Qt 렌더에서 통합 업무 입력 카드와 좌측 우선순위 목록의 배치를 확인했다. 새 `release\\EventFlowTeams\\EventFlowTeams.exe`(10,627,894바이트, SHA-256 `462E8F5E0FDC14082EBA6765F8DF5C6C409AA0F2B47E76E25ACD94BFD69EFA89`)는 격리된 임시 사용자 데이터 환경에서 10초 기동 후 `--update-health-file`에 `ok`를 기록했다. GitHub Release·자동 업데이트는 생성하지 않았다.
+
+## 2026-08-30 v0.3.64 공개 배포
+
+- 통합 업무 등록, 회사 직원 삭제, 전체 달력 프로젝트 필터 및 Teams 단일 달력 변경을 사용자 업데이트 대상으로 `0.3.64`에 포함했다.
+- 공개 전 Teams Pytest 57건과 Python compileall을 통과했으며, 로컬 Inno Setup 설치 파일 `release\\installer\\EventFlowTeams-Setup-0.3.64.exe`를 생성했다. 공개 태그의 GitHub Windows release 워크플로가 버전 설치 파일, 고정 이름 설치 파일, 자동 업데이트 ZIP, SHA-256 목록을 게시한다.

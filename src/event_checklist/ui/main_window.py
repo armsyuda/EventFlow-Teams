@@ -156,6 +156,11 @@ class MainWindow(QMainWindow):
         self.nav_group.addButton(button, index); self.nav_buttons.append(button)
         self.global_menu_layout.addWidget(button)
 
+    def hide_project_calendar_for_teams(self) -> None:
+        """Hide the shared Local project calendar from the Teams shell only."""
+        self.calendar.hide()
+        self.nav_buttons[2].hide()
+
     def add_company_global_nav_button(self, button: QPushButton) -> None:
         """Place company-wide routes above project routes and keep one active route."""
         button.setCheckable(True); button.setProperty("nav", True)
