@@ -76,7 +76,7 @@ def main(argv=None) -> int:
     db = None
     try:
         if splash is not None:
-            splash.set_status("행사 데이터를 확인하고 있습니다…")
+            splash.set_status("프로젝트 데이터를 확인하고 있습니다…")
         db = Database(database_path())
         if not any(backup_dir().glob("auto_event_flow_*.db")):
             create_rotating_auto_backup(db, backup_dir(), keep=10)

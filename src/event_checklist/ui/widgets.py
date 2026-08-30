@@ -823,6 +823,31 @@ def configure_grouped_editor_table(table: QTableWidget, anchor_column: int = 1) 
     table.verticalHeader().setMinimumSectionSize(48)
 
 
+class _DirectDateCalendar(QCalendarWidget):
+    """Shared date-input calendar with intentionally quiet adjacent months."""
+
+    adjacent_month_color = QColor("#BAC1CC")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def paintCell(self, painter: QPainter, rect: QRect, value: QDate) -> None:  # noqa: N802
+        """Draw spillover days ourselves because the native grid ignores formats.
+
+        Some Windows Qt styles repaint the date number after `dateTextFormat`
+        has been applied.  Painting this simple white cell and its number last
+        makes the lower-contrast outside-month dates deterministic everywhere.
+        """
+        super().paintCell(painter, rect, value)
+        if value.month() == self.monthShown():
+            return
+        painter.save()
+        painter.fillRect(rect.adjusted(1, 1, -1, -1), QColor("#FFFFFF"))
+        painter.setPen(self.adjacent_month_color)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(value.day()))
+        painter.restore()
+
+
 class _DirectCalendarPopup(QFrame):
     """월 이동과 연도 선택을 명확히 분리한 날짜 선택 팝업."""
 
@@ -847,7 +872,10 @@ class _DirectCalendarPopup(QFrame):
         self.month_label = QLabel(self); self.month_label.setObjectName("DirectCalendarMonthLabel")
         self.month_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.year_combo = QComboBox(self); self.year_combo.setObjectName("DirectCalendarYear")
-        self.year_combo.setEditable(True); self.year_combo.lineEdit().setReadOnly(True); self.year_combo.lineEdit().setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # The previous read-only line editor consumed clicks over most of the
+        # field, so only the tiny arrow opened the year menu.
+        self.year_combo.setEditable(False)
+        self.year_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         self.year_combo.setToolTip("연도 선택")
         self.next_button = QPushButton("›", self); self.next_button.setObjectName("DirectCalendarMonthButton")
         self.next_button.setToolTip("다음 달")
@@ -858,27 +886,43 @@ class _DirectCalendarPopup(QFrame):
         header.addStretch(1)
         header.addWidget(self.next_button)
         self.root.addLayout(header)
-        self.calendar = QCalendarWidget(self)
+        self.calendar = _DirectDateCalendar(self)
         self.calendar.setNavigationBarVisible(False)
         self.calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
         self.calendar.setGridVisible(True)
-        self.calendar.setFixedSize(326, 254)
+        # Six full date rows plus the weekday header need more than the old
+        # 254px height on Windows high-DPI displays.  Keep the grid entirely
+        # inside its popup instead of letting the final row be clipped.
+        self.calendar.setFixedSize(326, 280)
         self.root.addWidget(self.calendar, 0, Qt.AlignmentFlag.AlignCenter)
-        self.setFixedSize(340, 304)
         self.previous_button.clicked.connect(self.calendar.showPreviousMonth)
         self.next_button.clicked.connect(self.calendar.showNextMonth)
         self.year_combo.currentIndexChanged.connect(self._select_year)
         self.calendar.currentPageChanged.connect(self._sync_header)
         self._sync_header(self.calendar.yearShown(), self.calendar.monthShown())
+        self._fit_to_contents()
+
+    def _fit_to_contents(self) -> None:
+        """Size the shared popup from its real layout, including app styling.
+
+        A fixed height worked only until a checklist popup added its two action
+        buttons.  The app stylesheet makes those buttons taller than the
+        native defaults, so hard-coded heights let them overlap the final
+        calendar week.  The layout's own size hint is DPI/style aware.
+        """
+        self.root.activate()
+        content_height = max(self.root.sizeHint().height(), self.root.minimumSize().height())
+        self.setFixedWidth(340)
+        self.setFixedHeight(content_height + self.frameWidth() * 2 + 2)
 
     def set_clear_action(self, label: str) -> None:
         if hasattr(self, "clear_button"):
             return
         actions = QHBoxLayout(); actions.setContentsMargins(2, 0, 2, 0)
         self.clear_button = QPushButton(label, self); self.clear_button.setToolTip("입력한 날짜를 지우고 미입력 상태로 되돌립니다.")
-        close = QPushButton("닫기", self); close.clicked.connect(self.hide)
-        actions.addWidget(self.clear_button); actions.addStretch(); actions.addWidget(close)
-        self.root.addLayout(actions); self.setFixedSize(340, 344)
+        self.close_button = QPushButton("닫기", self); self.close_button.clicked.connect(self.hide)
+        actions.addWidget(self.clear_button); actions.addStretch(); actions.addWidget(self.close_button)
+        self.root.addLayout(actions); self._fit_to_contents()
 
     def set_selected_date(self, value: QDate) -> None:
         self.calendar.setSelectedDate(value)
@@ -948,7 +992,18 @@ class DirectDateEdit(QDateEdit):
     def _open_calendar(self):
         popup = self._ensure_calendar()
         popup.set_selected_date(self.date())
-        popup.move(self.mapToGlobal(self.rect().bottomLeft()))
+        # Prefer opening below the field, but keep every date row inside the
+        # usable screen when a form sits near the bottom or right edge.
+        anchor = self.mapToGlobal(self.rect().bottomLeft())
+        screen = QApplication.screenAt(anchor) or QApplication.primaryScreen()
+        if screen:
+            available = screen.availableGeometry()
+            x = max(available.left(), min(anchor.x(), available.right() - popup.width() + 1))
+            y = anchor.y()
+            if y + popup.height() > available.bottom() + 1:
+                y = max(available.top(), self.mapToGlobal(self.rect().topLeft()).y() - popup.height())
+            anchor = QPoint(x, y)
+        popup.move(anchor)
         popup.show(); popup.raise_(); popup.activateWindow()
 
     def _choose_date(self, value: QDate):
@@ -1226,7 +1281,10 @@ class CategoryCell(QWidget):
         layout.setContentsMargins(4, 2, 4, 3)
         layout.setSpacing(0)
         # 중분류(minor) 셀에는 중분류 이름만, 대분류(minor None) 셀에는 대분류 이름만 표시한다.
-        self.label = TwoLineLabel(str(minor if minor is not None else major))
+        # Create child labels with their final parent immediately.  On Windows,
+        # creating them parentless can briefly expose them as native windows
+        # before the table takes ownership of this category cell.
+        self.label = TwoLineLabel(str(minor if minor is not None else major), self)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setWordWrap(True)
         # 열 폭이 매우 좁아도 중분류는 두 줄까지만 사용한다. 드래그 핸들 공간은
@@ -1243,7 +1301,7 @@ class CategoryCell(QWidget):
         else:
             layout.addWidget(self.label, 1)
         # 드래그 핸들: 크고 눈에 띄게, 드래그 가능 표시(⋮⋮ / 좌우 여백 버튼).
-        self.handle = QLabel("\u2630")  # ☰ 아이콘 — 드래그 가능을 명확히 표현
+        self.handle = QLabel("\u2630", self)  # ☰ 아이콘 — 드래그 가능을 명확히 표현
         self.handle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.handle.setFixedHeight(22)
         self.handle.setToolTip("끌어서 분류 순서 변경 (더블클릭: 이름 변경)")
@@ -1371,12 +1429,12 @@ def install_category_cell_widgets(table: FastEditableTable, major_column: int, m
     for row, column, major, minor in group_starts_for(major_column):
         table.setCellWidget(row, column, CategoryCell(
             major, minor, table, major_column, minor_column, True,
-            lambda m, n: on_edit(m, n), on_move,
+            lambda m, n: on_edit(m, n), on_move, table.viewport(),
         ))
     for row, column, major, minor in group_starts_for(minor_column):
         table.setCellWidget(row, column, CategoryCell(
             major, minor, table, major_column, minor_column, False,
-            lambda m, n: on_edit(m, n), on_move,
+            lambda m, n: on_edit(m, n), on_move, table.viewport(),
         ))
 
 

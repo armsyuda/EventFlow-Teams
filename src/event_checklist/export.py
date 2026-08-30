@@ -38,7 +38,7 @@ THIN_BORDER = Border(
 
 def _safe_filename(value: str) -> str:
     clean = "".join("_" if char in '<>:"/\\|?*' else char for char in str(value)).strip(" .")
-    return clean[:80].rstrip(" ._") or "행사"
+    return clean[:80].rstrip(" ._") or "프로젝트"
 
 
 def default_excel_filename(event, kind: str, options: PdfOptions = PdfOptions(), printed_on=None,
@@ -117,7 +117,7 @@ def _apply_top_header(ws, event, document_title: str, context: str, summary: str
     title_size = 13 if title_length <= 28 else (11 if title_length <= 50 else 9)
     title.font = Font(name="맑은 고딕", size=title_size, bold=True, color=INK)
     title.alignment = Alignment(vertical="center", shrink_to_fit=True)
-    period = ws.cell(3, period_start, f"행사기간  {_event_period(event)}")
+    period = ws.cell(3, period_start, f"프로젝트 기간  {_event_period(event)}")
     period.font = Font(name="맑은 고딕", size=7, bold=True, color=MUTED)
     period.alignment = Alignment(horizontal="center", vertical="center", shrink_to_fit=True)
     summary_cell = ws.cell(3, summary_start, summary)
@@ -230,7 +230,7 @@ def _checklist_sheet(wb, event, tasks, options: PdfOptions, major: str, minor: s
         context += f" · 대분류 {major}"
     else:
         context += " · 전체"
-    _apply_top_header(ws, event, "행사 체크리스트", context, _progress(tasks), len(headers))
+    _apply_top_header(ws, event, "프로젝트 체크리스트", context, _progress(tasks), len(headers))
     _style_table_header(ws, headers, widths)
     font_size = 8 if len(tasks) <= (28 if portrait else 24) else 10
     group_rows = []
@@ -294,11 +294,11 @@ def _settlement_sheet(wb, event, summary, options: PdfOptions):
         widths = [8, 9, 18, 32, 7, 7, 13, 14, 8, 13, 14, 15]
         detail_col, qty_col, price_col, supply_col, vat_type_col, vat_col, total_col = 4, 5, 7, 8, 9, 10, 11
     else:
-        headers = ["대분류", "중분류", "항목", "수량", "단위", "행사 단가", "공급가", "VAT", "VAT 금액", "합계", "업체", "세부내용"]
+        headers = ["대분류", "중분류", "항목", "수량", "단위", "프로젝트 단가", "공급가", "VAT", "VAT 금액", "합계", "업체", "세부내용"]
         widths = [9, 10, 20, 8, 8, 14, 15, 9, 14, 15, 16, 34]
         detail_col, qty_col, price_col, supply_col, vat_type_col, vat_col, total_col = 12, 4, 6, 7, 8, 9, 10
     _apply_top_header(
-        ws, event, "행사 정산내역", "공급가 및 VAT 정산",
+        ws, event, "프로젝트 정산내역", "공급가 및 VAT 정산",
         settlement_header_summary(summary), len(headers),
     )
     _style_table_header(ws, headers, widths)
@@ -407,7 +407,7 @@ def export_excel(db, destination: Path, event_id: int, kind: str = "checklist",
     service = EventService(db)
     event = service.get_event(event_id)
     if not event:
-        raise ValueError("내보낼 행사를 찾을 수 없습니다.")
+        raise ValueError("내보낼 프로젝트를 찾을 수 없습니다.")
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     wb = Workbook()

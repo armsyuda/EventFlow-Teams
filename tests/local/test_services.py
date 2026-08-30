@@ -26,10 +26,22 @@ def test_event_start_and_end_dates_are_validated(db):
     )
     event = service.get_event(event_id)
     assert (event["start_date"], event["end_date"]) == ("2026-09-10", "2026-09-12")
-    with pytest.raises(ValueError, match="행사 마감일"):
+    with pytest.raises(ValueError, match="프로젝트 마감일"):
         service.update_event(
             event_id, "3일 행사", date(2026, 9, 12), date(2026, 9, 10),
         )
+
+
+def test_empty_project_can_be_created_and_receive_a_direct_checklist_item(db):
+    service = EventService(db)
+    event_id = service.create_event("빈 프로젝트", date(2026, 10, 2), None)
+
+    assert service.list_tasks(event_id) == []
+    task_id = service.add_custom_task(
+        event_id, major="운영", minor="현장", name="직접 만든 항목", detail="체크리스트에서 추가",
+    )
+    task = db.one("SELECT master_item_id,name,detail FROM event_tasks WHERE id=?", (task_id,))
+    assert tuple(task) == (None, "직접 만든 항목", "체크리스트에서 추가")
 
 
 def test_tasks_and_calendar_filter_vendor_and_pm_independently(db):

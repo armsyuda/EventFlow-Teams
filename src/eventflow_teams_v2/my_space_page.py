@@ -6,37 +6,12 @@ from PySide6.QtCore import QDate, QSize, Qt
 from PySide6.QtWidgets import QAbstractItemView, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QTextEdit, QVBoxLayout, QWidget
 from event_checklist.ui.widgets import DirectDateEdit
 
-from .staff_pages import PASTEL_SPECTRUM
-
-
-class ColorCascade(QWidget):
-    """Overlapping circular palette used in the My Space title row."""
-    def __init__(self, changed: Callable[[str], None], parent=None):
-        super().__init__(parent); self.changed = changed; self.buttons: list[tuple[str, QPushButton]] = []; self.setFixedSize(470, 38)
-        for color, label in PASTEL_SPECTRUM:
-            button = QPushButton(self); button.setToolTip(label); button.setFixedSize(30, 30)
-            button.clicked.connect(lambda _checked=False, value=color: self.changed(value)); self.buttons.append((color, button))
-
-    def set_selected(self, selected: str) -> None:
-        selected_button = None
-        for index, (color, button) in enumerate(self.buttons):
-            button.move(index * 23, 4)
-            if index:
-                button.stackUnder(self.buttons[index - 1][1])
-            border = "1px solid #344054" if color == selected else "1px solid #94A3B8"
-            button.setStyleSheet(f"QPushButton{{background:{color};border:{border};border-radius:15px;min-width:30px;max-width:30px;min-height:30px;max-height:30px;padding:0;}} QPushButton:hover{{border:3px solid #475467;}}")
-            if color == selected:
-                selected_button = button
-        if selected_button:
-            selected_button.raise_()
-
-
 class MySpacePage(QWidget):
-    """Private colour, absence scheduling and personal task-priority workspace."""
-    def __init__(self, db, user_id: str, change_color: Callable[[str], None], save_schedule: Callable[[dict], bool], edit_schedule: Callable[[dict | None], None], delete_schedule: Callable[[dict], None], reorder_schedules: Callable[[list[str]], None], reorder_tasks: Callable[[list[str]], None], save_task: Callable[[str, dict], bool], parent=None):
-        super().__init__(parent); self.db, self.user_id = db, user_id; self.change_color, self.save_schedule = change_color, save_schedule; self.edit_schedule, self.delete_schedule = edit_schedule, delete_schedule; self.reorder_schedules, self.reorder_tasks, self.save_task = reorder_schedules, reorder_tasks, save_task; self._suppress = False
+    """Personal schedule and task-priority workspace with a server-assigned staff colour."""
+    def __init__(self, db, user_id: str, save_schedule: Callable[[dict], bool], edit_schedule: Callable[[dict | None], None], delete_schedule: Callable[[dict], None], reorder_schedules: Callable[[list[str]], None], reorder_tasks: Callable[[list[str]], None], save_task: Callable[[str, dict], bool], parent=None):
+        super().__init__(parent); self.db, self.user_id = db, user_id; self.save_schedule = save_schedule; self.edit_schedule, self.delete_schedule = edit_schedule, delete_schedule; self.reorder_schedules, self.reorder_tasks, self.save_task = reorder_schedules, reorder_tasks, save_task; self._suppress = False
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 32); root.setSpacing(16)
-        title = QHBoxLayout(); title.addWidget(QLabel("나의 공간", objectName="PageTitle")); title.addStretch(); self.palette = ColorCascade(self.change_color); title.addWidget(self.palette, 0, Qt.AlignmentFlag.AlignTop); root.addLayout(title)
+        root.addWidget(QLabel("나의 공간", objectName="PageTitle"))
         columns = QHBoxLayout(); columns.setSpacing(16); root.addLayout(columns, 1); left = self._column(); right = self._column(); self.schedule_column = right; columns.addWidget(left, 11); columns.addWidget(right, 9)
         left_layout = left.layout(); left_layout.addWidget(QLabel("내 업무 우선순위", objectName="SectionTitle")); left_layout.addWidget(QLabel("⋮⋮ 손잡이를 잡아 끌면 급한 순서로 바꿀 수 있습니다. 이 순서는 나에게만 적용됩니다.", objectName="Muted"))
         self.tasks = self._sortable_list(self._save_task_order, "MySpaceTaskList"); self.tasks.itemDoubleClicked.connect(self._show_task_detail); left_layout.addWidget(self.tasks, 1)
@@ -60,7 +35,7 @@ class MySpacePage(QWidget):
         view.model().rowsMoved.connect(lambda *_args: None if self._suppress else callback()); return view
 
     def refresh(self) -> None:
-        self._suppress = True; selected = self.db.one("SELECT color_hex FROM teams_v2_staff_members WHERE user_id=?", (self.user_id,)); selected_color = str(selected["color_hex"]) if selected else "#A7D4F0"; self.palette.set_selected(selected_color); self.schedule_column.setStyleSheet(f"QFrame#MySpaceColumn{{background:#FFFFFF;border:2px solid {selected_color};border-radius:16px;}}"); self.schedules.clear(); self.tasks.clear()
+        self._suppress = True; selected = self.db.one("SELECT color_hex FROM teams_v2_staff_members WHERE user_id=?", (self.user_id,)); selected_color = str(selected["color_hex"]) if selected else "#A7D4F0"; self.schedule_column.setStyleSheet(f"QFrame#MySpaceColumn{{background:#FFFFFF;border:2px solid {selected_color};border-radius:16px;}}"); self.schedules.clear(); self.tasks.clear()
         for schedule in self.db.query("SELECT * FROM teams_v2_personal_schedules WHERE member_user_id=? ORDER BY sort_order,start_date,id", (self.user_id,)):
             item = QListWidgetItem(); item.setData(Qt.ItemDataRole.UserRole, str(schedule["id"])); item.setSizeHint(QSize(0, 104)); self.schedules.addItem(item); self.schedules.setItemWidget(item, self._schedule_card(dict(schedule)))
         if not self.schedules.count(): self._empty(self.schedules, "등록한 개인 일정이 없습니다.")

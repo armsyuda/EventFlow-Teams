@@ -36,16 +36,16 @@ class EventService:
     ) -> int:
         name = name.strip()
         if not name:
-            raise ValueError("행사명을 입력하세요.")
+            raise ValueError("프로젝트명을 입력하세요.")
         if end_date and end_date < start_date:
-            raise ValueError("행사 마감일은 행사 시작일보다 빠를 수 없습니다.")
+            raise ValueError("프로젝트 마감일은 프로젝트 시작일보다 빠를 수 없습니다.")
         ids = list(dict.fromkeys(int(value) for value in selected_master_ids))
         imported_ids = list(dict.fromkeys(int(value) for value in source_task_ids))
         if source_event_id is not None:
             if ids:
-                raise ValueError("기본 항목과 이전 행사 항목을 동시에 가져올 수 없습니다.")
+                raise ValueError("기본 항목과 이전 프로젝트 항목을 동시에 가져올 수 없습니다.")
             if not imported_ids:
-                raise ValueError("이전 행사에서 가져올 항목을 선택하세요.")
+                raise ValueError("이전 프로젝트에서 가져올 항목을 선택하세요.")
             placeholders = ",".join("?" for _ in imported_ids)
             imported_tasks = self.db.query(
                 f"""SELECT * FROM event_tasks
@@ -54,17 +54,17 @@ class EventService:
                 (int(source_event_id), *imported_ids),
             )
             if len(imported_tasks) != len(imported_ids):
-                raise ValueError("이전 행사의 선택 항목 중 가져올 수 없는 항목이 있습니다.")
+                raise ValueError("이전 프로젝트의 선택 항목 중 가져올 수 없는 항목이 있습니다.")
             masters = []
         else:
-            if not ids:
-                raise ValueError("하나 이상의 기본 항목을 선택하세요.")
-            placeholders = ",".join("?" for _ in ids)
-            masters = self.db.query(
-                f"SELECT * FROM master_items WHERE id IN ({placeholders}) ORDER BY sort_order", ids
-            )
-            if len(masters) != len(ids):
-                raise ValueError("선택한 기본 항목 중 사용할 수 없는 항목이 있습니다.")
+            masters = []
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                masters = self.db.query(
+                    f"SELECT * FROM master_items WHERE id IN ({placeholders}) ORDER BY sort_order", ids
+                )
+                if len(masters) != len(ids):
+                    raise ValueError("선택한 기본 항목 중 사용할 수 없는 항목이 있습니다.")
             imported_tasks = []
 
         selected_vendors = {int(value) for value in vendor_ids}
@@ -144,9 +144,9 @@ class EventService:
         rebase_auto: bool = True,
     ) -> None:
         if not name.strip():
-            raise ValueError("행사명을 입력하세요.")
+            raise ValueError("프로젝트명을 입력하세요.")
         if end_date and end_date < start_date:
-            raise ValueError("행사 마감일은 행사 시작일보다 빠를 수 없습니다.")
+            raise ValueError("프로젝트 마감일은 프로젝트 시작일보다 빠를 수 없습니다.")
         with self.db.transaction() as conn:
             conn.execute(
                 """UPDATE events SET name=?,start_date=?,end_date=?,location=?,organizer=?,budget=?,budget_tax_mode=?,pm_vendor_id=?,
@@ -253,7 +253,7 @@ class EventService:
             (event_id, *ids),
         )
         if len(tasks) != len(ids):
-            raise ValueError("선택한 항목 중 현재 행사에서 변경할 수 없는 항목이 있습니다.")
+            raise ValueError("선택한 항목 중 현재 프로젝트에서 변경할 수 없는 항목이 있습니다.")
 
         if "pm_assignee_id" in assignments and assignments["pm_assignee_id"] is not None:
             event = self.get_event(event_id)
@@ -261,7 +261,7 @@ class EventService:
                 "SELECT kind,company_id FROM contacts WHERE id=?", (assignments["pm_assignee_id"],)
             )
             if not person or person["kind"] != "PERSON" or person["company_id"] != event["pm_vendor_id"]:
-                raise ValueError("담당자(PM)는 이 행사의 PM 업체 소속 담당자만 지정할 수 있습니다.")
+                raise ValueError("담당자(PM)는 이 프로젝트의 PM 업체 소속 담당자만 지정할 수 있습니다.")
 
         if "vendor_id" in assignments and assignments["vendor_id"] is not None:
             vendor = self.db.one("SELECT kind FROM contacts WHERE id=?", (assignments["vendor_id"],))
@@ -548,7 +548,7 @@ class EventService:
     def add_master_tasks(self, event_id: int, master_ids: Iterable[int]) -> tuple[int, int]:
         event = self.get_event(event_id)
         if not event:
-            raise ValueError("행사를 찾을 수 없습니다.")
+            raise ValueError("프로젝트를 찾을 수 없습니다.")
         restored = 0
         added = 0
         with self.db.transaction() as conn:

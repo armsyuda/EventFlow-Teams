@@ -14,10 +14,10 @@ class EventCard(QFrame):
         super().__init__(parent); self.event_id = int(event["id"]); self.setObjectName("EventCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setToolTip("클릭하여 이 행사를 엽니다.")
+        self.setToolTip("클릭하여 이 프로젝트를 엽니다.")
         layout = QHBoxLayout(self); layout.setContentsMargins(18, 14, 14, 14)
         text = QVBoxLayout(); name = QLabel(event["name"]); name.setObjectName("EventCardTitle")
-        dates = QLabel(f"행사 {event['start_date']}  →  {event['end_date'] or event['start_date']}"); dates.setObjectName("Muted")
+        dates = QLabel(f"프로젝트 {event['start_date']}  →  {event['end_date'] or event['start_date']}"); dates.setObjectName("Muted")
         text.addWidget(name); text.addWidget(dates); layout.addLayout(text, 1)
         rate = QLabel(f"진행률 {progress}%"); rate.setObjectName("Muted")
         layout.addWidget(rate)
@@ -49,10 +49,10 @@ class DashboardPage(QWidget):
     def _landing(self):
         page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(18)
         top = QHBoxLayout(); box = QVBoxLayout(); title = QLabel("이벤트 플로우"); title.setObjectName("PageTitle")
-        description = QLabel("새 행사를 만들거나 작업할 행사를 선택하세요."); description.setObjectName("PageDescription")
+        description = QLabel("프로젝트를 만들거나 작업할 프로젝트를 선택하세요."); description.setObjectName("PageDescription")
         box.addWidget(title); box.addWidget(description); top.addLayout(box); top.addStretch()
-        create = QPushButton("+ 새 행사"); create.setProperty("primary", True); create.clicked.connect(self.create_requested); top.addWidget(create); layout.addLayout(top)
-        label = QLabel("행사 목록"); label.setObjectName("SectionTitle"); layout.addWidget(label)
+        create = QPushButton("+ 프로젝트 생성"); create.setProperty("primary", True); create.clicked.connect(self.create_requested); top.addWidget(create); layout.addLayout(top)
+        label = QLabel("프로젝트 목록"); label.setObjectName("SectionTitle"); layout.addWidget(label)
         self.event_list = QScrollArea(); self.event_list.setWidgetResizable(True); self.event_list.setObjectName("EventListArea")
         content = QWidget(); self.event_list_layout = QVBoxLayout(content); self.event_list_layout.setContentsMargins(0, 0, 4, 0); self.event_list_layout.setSpacing(10)
         self.event_list.setWidget(content); layout.addWidget(self.event_list, 1); return page
@@ -61,10 +61,10 @@ class DashboardPage(QWidget):
         page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(18)
         top = QHBoxLayout(); box = QVBoxLayout(); self.overview_title = QLabel(""); self.overview_title.setObjectName("PageTitle")
         self.overview_dates = QLabel(""); self.overview_dates.setObjectName("PageDescription"); box.addWidget(self.overview_title); box.addWidget(self.overview_dates)
-        top.addLayout(box); top.addStretch(); edit = QPushButton("행사 정보 수정"); edit.clicked.connect(lambda: self.event_id and self.edit_requested.emit(self.event_id))
-        delete = QPushButton("행사 삭제"); delete.setProperty("danger", True)
+        top.addLayout(box); top.addStretch(); edit = QPushButton("프로젝트 정보 수정"); edit.clicked.connect(lambda: self.event_id and self.edit_requested.emit(self.event_id))
+        delete = QPushButton("프로젝트 삭제"); delete.setProperty("danger", True)
         delete.clicked.connect(lambda: self.event_id and self.delete_requested.emit(self.event_id))
-        change = QPushButton("다른 행사 선택"); change.clicked.connect(self.clear_requested)
+        change = QPushButton("다른 프로젝트 선택"); change.clicked.connect(self.clear_requested)
         top.addWidget(edit); top.addWidget(delete); top.addWidget(change); layout.addLayout(top)
         cards = QGridLayout(); self.kpis = {}
         for index, (key, label) in enumerate([("managed", "관리 대상"), ("completed", "완료"), ("in_progress", "진행중"), ("not_started", "미착수"), ("overdue", "지연")]):
@@ -83,7 +83,7 @@ class DashboardPage(QWidget):
             if item.widget(): item.widget().deleteLater()
         events = self.service.list_events()
         if not events:
-            empty = QLabel("아직 등록된 행사가 없습니다. 새 행사를 만들어 시작하세요."); empty.setObjectName("EmptyState"); empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty = QLabel("아직 등록된 프로젝트가 없습니다. 프로젝트를 만들어 시작하세요."); empty.setObjectName("EmptyState"); empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.event_list_layout.addWidget(empty, 1); return
         for event in events:
             data = self.service.dashboard(int(event["id"])); card = EventCard(event, round((data.get("progress") or 0) * 100))
@@ -96,7 +96,7 @@ class DashboardPage(QWidget):
         event = self.service.get_event(event_id)
         if not event: self.set_event(None); return
         self.views.setCurrentIndex(1); self.overview_title.setText(event["name"])
-        self.overview_dates.setText(f"행사 {event['start_date']}  →  {event['end_date'] or event['start_date']}")
+        self.overview_dates.setText(f"프로젝트 {event['start_date']}  →  {event['end_date'] or event['start_date']}")
         data = self.service.dashboard(event_id)
         for key, card in self.kpis.items(): card.set_value(data.get(key) or 0)
         progress = round((data.get("progress") or 0) * 100); self.progress_text.setText(f"{progress}% · {data.get('completed') or 0}/{data.get('managed') or 0}개 완료")

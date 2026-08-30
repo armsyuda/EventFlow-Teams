@@ -113,7 +113,7 @@ def test_settlement_excel_has_pdf_like_layout_formulas_and_all_page_options(db, 
             workbook = load_workbook(path, read_only=False, data_only=False)
             assert workbook.sheetnames == ["정산내역"]
             sheet = workbook["정산내역"]
-            assert "전체 행사금액(VAT 포함)  500,039,000원" in sheet["J3"].value
+            assert "전체 프로젝트 금액(VAT 포함)  500,039,000원" in sheet["J3"].value
             assert "정산 합계  275,000원 · 499,764,000원 남음" in sheet["J3"].value
             assert sheet["J3"].alignment.wrap_text is True
             assert str(sheet.page_setup.paperSize) == (
@@ -145,14 +145,14 @@ def test_settlement_output_header_names_budget_comparison_and_balance(db):
     )
     included = EventService(db).settlement_summary(event_id)
     assert settlement_header_summary(included) == (
-        "전체 행사금액(VAT 포함)  300,000원\n정산 합계  220,000원 · 80,000원 남음"
+        "전체 프로젝트 금액(VAT 포함)  300,000원\n정산 합계  220,000원 · 80,000원 남음"
     )
     db.execute(
         "UPDATE events SET budget=150000,budget_tax_mode='EXCLUDED' WHERE id=?", (event_id,),
     )
     excluded = EventService(db).settlement_summary(event_id)
     assert settlement_header_summary(excluded) == (
-        "전체 행사금액(VAT 별도)  150,000원\n정산 공급가  200,000원 · 50,000원 부족"
+        "전체 프로젝트 금액(VAT 별도)  150,000원\n정산 공급가  200,000원 · 50,000원 부족"
     )
     db.execute("UPDATE events SET budget_tax_mode='UNSET' WHERE id=?", (event_id,))
     unset = EventService(db).settlement_summary(event_id)

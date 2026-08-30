@@ -31,7 +31,7 @@ class SettingsPage(QWidget):
         root.setSpacing(14)
         title = QLabel("설정")
         title.setObjectName("PageTitle")
-        description = QLabel("행사마다 공통으로 사용하는 기본 항목, 업체·담당자와 데이터를 관리합니다.")
+        description = QLabel("프로젝트마다 공통으로 사용하는 기본 항목, 업체·담당자와 데이터를 관리합니다.")
         description.setObjectName("PageDescription")
         root.addWidget(title)
         root.addWidget(description)
@@ -67,7 +67,7 @@ class SettingsPage(QWidget):
         layout.setContentsMargins(12, 16, 12, 12)
         layout.addWidget(self._section(
             "이벤트 플로우 · 이플",
-            f"행사 준비 체크리스트, 일정과 예산 배분을 한곳에서 관리하는 Windows 로컬 프로그램입니다.\n"
+            f"프로젝트 준비 체크리스트, 일정과 예산 배분을 한곳에서 관리하는 Windows 로컬 프로그램입니다.\n"
             f"버전 {__version__}\n설치 위치: "
             f"{current_executable().parent if is_packaged_app() and is_fixed_installation() else install_dir()}",
             [],
@@ -75,7 +75,7 @@ class SettingsPage(QWidget):
         layout.addWidget(self._section(
             "앱 업데이트",
             "앱을 시작할 때 GitHub 공개 릴리스를 확인합니다. 새 버전이 있으면 자동으로 내려받아 "
-            "현재 설치 파일을 교체하고 다시 시작합니다. 행사 데이터와 백업은 그대로 유지됩니다.",
+            "현재 설치 파일을 교체하고 다시 시작합니다. 프로젝트 데이터와 백업은 그대로 유지됩니다.",
             [],
         ))
         layout.addStretch()

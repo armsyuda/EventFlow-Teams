@@ -10,12 +10,6 @@ from event_checklist.ui.widgets import DirectDateEdit
 
 
 ROLE_LABELS = {"OWNER": "대표", "ADMIN": "관리자", "PM": "PM", "MEMBER": "직원", "VIEWER": "조회자"}
-PASTEL_SPECTRUM = (
-    ("#F3B6B6", "빨강"), ("#F6C0A8", "주황빨강"), ("#F7CBA4", "주황"), ("#F8D8A6", "연주황"), ("#F7E4A8", "황금"),
-    ("#F5EEAA", "노랑"), ("#E1EAA9", "노랑연두"), ("#CBE6A8", "연두"), ("#B5E1AF", "초록"), ("#A8DEC0", "민트초록"),
-    ("#A7DDCE", "청록"), ("#A8E0DD", "물빛"), ("#A8DFE8", "하늘청록"), ("#A7D4F0", "하늘"), ("#AAC6ED", "파랑"),
-    ("#B0BAEA", "남색"), ("#C0B5E8", "남보라"), ("#D0B4E8", "보라"), ("#DFB5E8", "연보라"), ("#E9B7E1", "자주보라"),
-)
 
 
 class WorkTaskCard(QFrame):
@@ -78,8 +72,8 @@ class StaffHorizontalScroll(QScrollArea):
 class EmployeeWorkPage(QWidget):
     """Company-visible active work board; personal absences remain calendar-only."""
 
-    def __init__(self, db, open_task: Callable[[int], None], current_user_id: str = "", on_color_change: Callable[[str], None] | None = None, can_transfer: bool = False, on_transfer: Callable[[str, str], bool] | None = None, on_refresh_staff: Callable[[], None] | None = None, parent=None):
-        super().__init__(parent); self.db = db; self.open_task = open_task; self.current_user_id = current_user_id; self.on_color_change = on_color_change; self.can_transfer = can_transfer; self.on_transfer = on_transfer; self.on_refresh_staff = on_refresh_staff
+    def __init__(self, db, open_task: Callable[[int], None], current_user_id: str = "", can_transfer: bool = False, on_transfer: Callable[[str, str], bool] | None = None, on_refresh_staff: Callable[[], None] | None = None, parent=None):
+        super().__init__(parent); self.db = db; self.open_task = open_task; self.current_user_id = current_user_id; self.can_transfer = can_transfer; self.on_transfer = on_transfer; self.on_refresh_staff = on_refresh_staff
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 32); root.setSpacing(12)
         root.addWidget(QLabel("직원업무", objectName="PageTitle"))
         root.addWidget(QLabel("동료가 맡은 진행 업무를 확인합니다. 개인 일정은 이 화면에 표시되지 않습니다.", objectName="PageDescription"))

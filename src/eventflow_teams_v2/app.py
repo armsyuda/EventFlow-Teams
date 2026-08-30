@@ -31,6 +31,7 @@ from .staff_pages import EmployeeWorkPage, PersonalScheduleDialog
 from .my_space_page import MySpacePage
 from .company_workspace import CompanyWorkspace
 from .company_pages import CompanyWorkPage, CompanyCalendarPage, FinancePage
+from .diagnostics import RuntimeWindowTrace
 
 
 class Worker(QThread):
@@ -135,14 +136,16 @@ class OrganizationPage(QWidget):
     def __init__(self, api: TeamsV2Api) -> None:
         super().__init__(); self.api = api; self.organizations: list[Organization] = []
         self.selected_organization: Organization | None = None; self.company_buttons: list[QPushButton] = []
-        self.message = QLabel("회사를 확인하는 중…")
-        self.company_list = QWidget(); self.company_list.setObjectName("TeamsCompanyList"); self.company_layout = QVBoxLayout(self.company_list); self.company_layout.setContentsMargins(0, 0, 0, 0); self.company_layout.setSpacing(7)
-        self.more_button = QPushButton(); self.more_button.setProperty("quiet", True); self.more_button.hide(); self.more_button.clicked.connect(self._show_more)
-        self.retry_button = QPushButton("회사 목록 다시 시도"); self.retry_button.setProperty("quiet", True); self.retry_button.hide(); self.retry_button.clicked.connect(self._retry)
-        card = QFrame(); card.setObjectName("Card"); card.setMaximumWidth(520); layout = QVBoxLayout(card); layout.setContentsMargins(36, 34, 36, 34); layout.setSpacing(12); layout.addWidget(QLabel("회사 선택", objectName="PageTitle")); layout.addWidget(QLabel("시작할 회사를 누르면 바로 업무 화면으로 들어갑니다.", objectName="PageDescription")); layout.addWidget(self.message); layout.addWidget(self.company_list); layout.addWidget(self.more_button)
+        card = QFrame(); card.setObjectName("Card"); card.setMaximumWidth(520); layout = QVBoxLayout(card); layout.setContentsMargins(36, 34, 36, 34); layout.setSpacing(12)
+        layout.addWidget(QLabel("회사 선택", objectName="PageTitle")); layout.addWidget(QLabel("시작할 회사를 누르면 바로 업무 화면으로 들어갑니다.", objectName="PageDescription"))
+        self.message = QLabel("회사를 확인하는 중…", card)
+        self.company_list = QWidget(card); self.company_list.setObjectName("TeamsCompanyList"); self.company_layout = QVBoxLayout(self.company_list); self.company_layout.setContentsMargins(0, 0, 0, 0); self.company_layout.setSpacing(7)
+        self.more_button = QPushButton(card); self.more_button.setProperty("quiet", True); self.more_button.hide(); self.more_button.clicked.connect(self._show_more)
+        self.retry_button = QPushButton("회사 목록 다시 시도", card); self.retry_button.setProperty("quiet", True); self.retry_button.hide(); self.retry_button.clicked.connect(self._retry)
+        layout.addWidget(self.message); layout.addWidget(self.company_list); layout.addWidget(self.more_button)
         layout.addWidget(self.retry_button)
-        divider = QFrame(); divider.setFrameShape(QFrame.Shape.HLine); divider.setStyleSheet("color:#E2E8F0;"); layout.addSpacing(12); layout.addWidget(divider); layout.addSpacing(8)
-        self.logout_button = QPushButton("로그아웃"); self.logout_button.setProperty("quiet", True); layout.addWidget(self.logout_button, 0, Qt.AlignmentFlag.AlignRight)
+        divider = QFrame(card); divider.setFrameShape(QFrame.Shape.HLine); divider.setStyleSheet("color:#E2E8F0;"); layout.addSpacing(12); layout.addWidget(divider); layout.addSpacing(8)
+        self.logout_button = QPushButton("로그아웃", card); self.logout_button.setProperty("quiet", True); layout.addWidget(self.logout_button, 0, Qt.AlignmentFlag.AlignRight)
         root = QVBoxLayout(self); root.setContentsMargins(24, 24, 24, 24); root.addStretch(); root.addWidget(card, 0, Qt.AlignmentFlag.AlignHCenter); root.addStretch()
         self.logout_button.clicked.connect(self.logout_requested)
 
@@ -161,9 +164,13 @@ class OrganizationPage(QWidget):
             if item.widget(): item.widget().deleteLater()
         self.company_buttons.clear()
         for index, organization in enumerate(self.organizations):
-            item = QPushButton(organization.name); item.setObjectName("TeamsCompanyChoice"); item.setProperty("primary", True); item.setToolTip(organization.display_role); item.setVisible(index < 5)
+            # This page is already visible when the company list arrives.  A
+            # parentless button followed by setVisible(True) becomes a tiny
+            # top-level native window for one frame before the layout adopts
+            # it.  Create it in the list from the beginning instead.
+            item = QPushButton(organization.name, self.company_list); item.setObjectName("TeamsCompanyChoice"); item.setProperty("primary", True); item.setToolTip(organization.display_role)
             item.clicked.connect(lambda _checked=False, value=organization: self.choose(value))
-            self.company_buttons.append(item); self.company_layout.addWidget(item)
+            self.company_buttons.append(item); self.company_layout.addWidget(item); item.setVisible(index < 5)
         hidden_count = max(0, len(self.organizations) - 5)
         self.more_button.setText(f"회사 {hidden_count}개 더 보기" if hidden_count else "")
         self.more_button.setVisible(bool(hidden_count))
@@ -420,7 +427,7 @@ class GuestManagementPage(QWidget):
         root = QVBoxLayout(self); root.setContentsMargins(42, 38, 42, 38); root.setSpacing(14)
         top = QHBoxLayout(); top.addWidget(QLabel("프로젝트 게스트 초대", objectName="PageTitle")); top.addStretch(); back = QPushButton("← 회사 관리"); back.setProperty("quiet", True); top.addWidget(back); root.addLayout(top)
         root.addWidget(QLabel("초대 링크는 한 번만 사용할 수 있고 7일 후 만료됩니다. 게스트는 체크리스트·달력만 조회합니다.", objectName="PageDescription"))
-        form = QFormLayout(); self.event = QComboBox(); self.settlement = QCheckBox("정산내역 조회 허용")
+        form = QFormLayout(); self.event = QComboBox(self); self.settlement = QCheckBox("정산내역 조회 허용", self)
         self.settlement.setVisible(organization.role in {"OWNER", "ADMIN"})
         for item in workspace.query("SELECT id, name FROM events ORDER BY start_date, id"):
             remote = workspace.one("SELECT remote_id FROM teams_v2_entity_map WHERE entity_type='EVENT' AND local_id=?", (item["id"],))
@@ -448,7 +455,7 @@ class GuestInvitationDialog(QDialog):
         self.setWindowTitle("프로젝트 게스트 초대"); self.setMinimumWidth(680); self.setModal(True)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("게스트는 초대된 프로젝트의 체크리스트·달력만 조회할 수 있습니다. 초대 링크는 한 번만 사용할 수 있고 7일 후 만료됩니다.", objectName="PageDescription"))
-        form = QFormLayout(); self.event = QComboBox(); self.settlement = QCheckBox("정산내역 조회 허용")
+        form = QFormLayout(); self.event = QComboBox(self); self.settlement = QCheckBox("정산내역 조회 허용", self)
         self.settlement.setVisible(organization.role in {"OWNER", "ADMIN"})
         for item in workspace.query("SELECT id, name FROM events ORDER BY start_date, id"):
             remote = workspace.one("SELECT remote_id FROM teams_v2_entity_map WHERE entity_type='EVENT' AND local_id=?", (item["id"],))
@@ -516,8 +523,8 @@ class GuestInvitationDialog(QDialog):
 
 
 class TeamsV2Window(QMainWindow):
-    def __init__(self, config: TeamsV2Config) -> None:
-        super().__init__(); self.config = config; self.store = SessionStore(); self.api = TeamsV2Api(config); self.workspace_db: WorkspaceDatabase | None = None
+    def __init__(self, config: TeamsV2Config, trace: RuntimeWindowTrace | None = None) -> None:
+        super().__init__(); self.config = config; self.trace = trace; self.store = SessionStore(); self.api = TeamsV2Api(config); self.workspace_db: WorkspaceDatabase | None = None
         self.local_window: MainWindow | None = None; self.current_organization: Organization | None = None; self.permission_worker: Worker | None = None; self.snapshot_worker: Worker | None = None; self.changes_worker: Worker | None = None; self.access_refresh_worker: Worker | None = None; self.sync_engine: WorkspaceSyncEngine | None = None; self.realtime: RealtimeSignalClient | None = None; self._sync_workers: list[Worker] = []; self._opened_cursor = ""; self._opened_with_pending = False
         self.update_info: UpdateInfo | None = None; self.update_progress: StartupSplash | None = None; self.update_check_worker: Worker | None = None; self.update_download_worker: Worker | None = None
         self.company_management_page: CompanyManagementPage | None = None; self.company_members_page: CompanyMembersPage | None = None; self.guest_management_page: GuestManagementPage | None = None
@@ -549,6 +556,7 @@ class TeamsV2Window(QMainWindow):
     def _open_workspace(self, organization: Organization) -> None:
         if not self.api.session:
             return
+        self._trace("company_selection_started")
         self._close_workspace()
         self.current_organization = organization
         self._v3_initial_open = True
@@ -561,14 +569,22 @@ class TeamsV2Window(QMainWindow):
         opened = self.workspace_db.one("SELECT remote_cursor FROM teams_v2_workspace WHERE singleton=1")
         self._opened_cursor = str(opened["remote_cursor"] or "") if opened else ""
         self._opened_with_pending = bool(self.workspace_db.pending_outbox())
-        self.local_window = MainWindow(self.workspace_db, enable_update_check=False)
-        self.local_window.setParent(self.stack)
-        self.local_window.setWindowFlags(Qt.WindowType.Widget)
+        # Construct Local directly as an embedded child.  Constructing it as a
+        # top-level window and reparenting it afterwards briefly flashes a
+        # separate window on Windows when a company is selected.
+        self.local_window = MainWindow(
+            self.workspace_db,
+            parent=self.stack,
+            enable_update_check=False,
+            embedded=True,
+        )
+        self._trace("local_shell_constructed")
         self._configure_local_shell(self.local_window, organization)
         self._install_company_workspace_features(self.local_window, organization)
         self._install_staff_features(self.local_window, organization)
         self.local_window.setEnabled(False)
         self.stack.addWidget(self.local_window); self.stack.setCurrentWidget(self.local_window); self.shell_title_bar.hide()
+        self._trace("workspace_page_shown")
         self._set_sync_state("CHECKING", "권한 확인 중…")
         self.permission_worker = Worker(lambda: self.api.permissions(organization.id))
         self.permission_worker.finished.connect(lambda value, oid=organization.id: self._permissions_loaded(oid, value))
@@ -585,12 +601,12 @@ class TeamsV2Window(QMainWindow):
         if self.workspace_db and not self.workspace_db.one("SELECT 1 FROM teams_v2_staff_members WHERE user_id=?", (self.api.session.user_id,)):
             self.workspace_db.conn.execute(
                 "INSERT INTO teams_v2_staff_members(user_id,display_name,role,job_title,color_hex,status) VALUES (?,?,?,?,?, 'ACTIVE')",
-                (self.api.session.user_id, self.api.session.email.split("@", 1)[0], organization.role, "", "#A7D7F1"),
+                (self.api.session.user_id, self.api.session.email.split("@", 1)[0], organization.role, "", "#A7D4F0"),
             )
             self.workspace_db.conn.commit()
-        staff_page = EmployeeWorkPage(self.workspace_db, local.open_teams_task, self.api.session.user_id, self._change_my_color, organization.role in {"OWNER", "ADMIN"}, self._transfer_task_member, self._refresh_staff_directory, local)
+        staff_page = EmployeeWorkPage(self.workspace_db, local.open_teams_task, self.api.session.user_id, organization.role in {"OWNER", "ADMIN"}, self._transfer_task_member, self._refresh_staff_directory, local)
         local.install_teams_staff_page(staff_page)
-        self.my_space_page = MySpacePage(self.workspace_db, self.api.session.user_id, self._change_my_color, self._save_personal_schedule_values, self._edit_personal_schedule, self._delete_personal_schedule, self._reorder_my_schedules, self._reorder_my_tasks, self._save_my_task_details, local)
+        self.my_space_page = MySpacePage(self.workspace_db, self.api.session.user_id, self._save_personal_schedule_values, self._edit_personal_schedule, self._delete_personal_schedule, self._reorder_my_schedules, self._reorder_my_tasks, self._save_my_task_details, local)
         local.stack.addWidget(self.my_space_page)
         my_button = QPushButton("나의 공간"); local.add_company_global_nav_button(my_button)
         my_button.clicked.connect(lambda: self._show_v3_page(self.my_space_page, my_button))
@@ -738,18 +754,6 @@ class TeamsV2Window(QMainWindow):
         if self.company_workspace:
             self.company_workspace.record_transport_failure(entry, message or "서버 연결을 확인할 수 없습니다.")
         self._show_toast("회사 전체 업무 변경을 오프라인 대기열에 보관했습니다.")
-
-    def _change_my_color(self, color_hex: str) -> None:
-        if not self.current_organization or not self.workspace_db or not self.api.session or not self.local_window:
-            return
-        try:
-            self.api.save_member_profile(self.current_organization.id, self.api.session.user_id, color_hex=color_hex)
-            self.workspace_db.conn.execute("UPDATE teams_v2_staff_members SET color_hex=? WHERE user_id=?", (color_hex, self.api.session.user_id)); self.workspace_db.conn.commit()
-            self.local_window.calendar.refresh()
-            if hasattr(self.local_window, "staff_work_page"): self.local_window.staff_work_page.refresh()
-            if hasattr(self, "my_space_page"): self.my_space_page.refresh()
-        except ApiError as exc:
-            QMessageBox.warning(self.local_window, "직원 색상 저장 실패", str(exc))
 
     def _edit_personal_schedule(self, schedule) -> None:
         if not self.current_organization or not self.workspace_db or not self.local_window:
@@ -954,6 +958,7 @@ class TeamsV2Window(QMainWindow):
         if not self.current_organization or self.current_organization.id != organization_id or not self.local_window or not self.workspace_db:
             return
         permissions = set(value) if isinstance(value, set) else set()
+        self._trace("permissions_loaded")
         self.workspace_db.set_access_context(role=self.current_organization.role, permissions=permissions)
         self._apply_v3_menu_permissions(permissions)
         cursor = self._opened_cursor
@@ -1059,10 +1064,11 @@ class TeamsV2Window(QMainWindow):
             if self.api.session and not self.workspace_db.one("SELECT 1 FROM teams_v2_staff_members WHERE user_id=?", (self.api.session.user_id,)):
                 self.workspace_db.conn.execute(
                     "INSERT INTO teams_v2_staff_members(user_id,display_name,role,job_title,color_hex,status) VALUES (?,?,?,?,?, 'ACTIVE')",
-                    (self.api.session.user_id, self.api.session.email.split("@", 1)[0], self.current_organization.role, "", "#A7D7F1"),
+                    (self.api.session.user_id, self.api.session.email.split("@", 1)[0], self.current_organization.role, "", "#A7D4F0"),
                 )
                 self.workspace_db.conn.commit()
             self.local_window.refresh_all()
+            self._trace("workspace_snapshot_rendered")
             for notice in snapshot.get("transfer_notifications", []):
                 if isinstance(notice, dict) and notice.get("message"):
                     self._show_toast(str(notice["message"]))
@@ -1259,6 +1265,10 @@ class TeamsV2Window(QMainWindow):
         toast.move(max(18, self.local_window.width() - toast.width() - 24), 56)
         toast.show()
         QTimer.singleShot(4200, toast.deleteLater)
+
+    def _trace(self, action: str) -> None:
+        if self.trace:
+            self.trace.record(action)
 
     def _show_conflict_choice(self) -> None:
         if not self.workspace_db or not self.local_window:
@@ -1461,7 +1471,11 @@ def main(argv: list[str] | None = None) -> None:
     app.setStyleSheet(application_stylesheet())
     ready_for_update = False
     try:
-        window = TeamsV2Window(TeamsV2Config.from_environment())
+        config = TeamsV2Config.from_environment()
+        trace = RuntimeWindowTrace(config.data_root)
+        app.installEventFilter(trace)
+        app.runtime_window_trace = trace  # Keep the trace alive for the whole app session.
+        window = TeamsV2Window(config, trace)
         ready_for_update = True
     except RuntimeError as exc:
         window = QMainWindow(); window.setCentralWidget(QLabel(str(exc))); window.resize(520, 180)

@@ -155,7 +155,7 @@ class WorkspaceDatabase(Database):
                 display_name TEXT NOT NULL DEFAULT '',
                 role TEXT NOT NULL DEFAULT 'MEMBER',
                 job_title TEXT NOT NULL DEFAULT '',
-                color_hex TEXT NOT NULL DEFAULT '#A7D7F1',
+                color_hex TEXT NOT NULL DEFAULT '#A7D4F0',
                 status TEXT NOT NULL DEFAULT 'ACTIVE'
             );
             CREATE TABLE IF NOT EXISTS teams_v2_personal_schedules (

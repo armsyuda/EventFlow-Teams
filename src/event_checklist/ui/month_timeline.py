@@ -184,7 +184,7 @@ class MonthTimeline(QWidget):
                         painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextSingleLine, label)
                     self._hits.append((
                         event_bar,
-                        f"행사: {self.event_period['name']}\n{event_start.isoformat()} ~ {event_end.isoformat()}",
+                        f"프로젝트: {self.event_period['name']}\n{event_start.isoformat()} ~ {event_end.isoformat()}",
                     ))
             for lane, kind, entry, first, last, is_start, is_end in visible:
                 x = first * cell_w + (4 if is_start else 0)

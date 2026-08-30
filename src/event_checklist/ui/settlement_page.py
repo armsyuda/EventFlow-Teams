@@ -39,7 +39,7 @@ class SettlementPage(QWidget):
         box = QVBoxLayout()
         title = QLabel("정산내역")
         title.setObjectName("PageTitle")
-        self.description = QLabel("행사를 선택하면 예산과 항목 합계를 비교할 수 있습니다.")
+        self.description = QLabel("프로젝트를 선택하면 예산과 항목 합계를 비교할 수 있습니다.")
         self.description.setObjectName("PageDescription")
         box.addWidget(title)
         box.addWidget(self.description)
@@ -87,7 +87,7 @@ class SettlementPage(QWidget):
         self.table = FastEditableTable(0, 12)
         self.table.set_money_columns({5, 6, 8, 9})
         self.table.setHorizontalHeaderLabels([
-            "대분류", "중분류", "항목", "수량", "단위", "행사 단가", "공급가",
+            "대분류", "중분류", "항목", "수량", "단위", "프로젝트 단가", "공급가",
             "VAT 구분", "VAT", "합계", "업체", "메모",
         ])
         self.table.verticalHeader().setVisible(False)

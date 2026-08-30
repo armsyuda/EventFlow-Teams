@@ -62,6 +62,20 @@ def test_new_local_event_preserves_local_task_rows_for_server_creation(tmp_path:
     database.close()
 
 
+def test_new_empty_project_is_sent_with_an_empty_task_list(tmp_path: Path) -> None:
+    database = WorkspaceDatabase(workspace_database_path(tmp_path, "user", "org"), user_id="user", organization_id="org")
+    WorkspaceSnapshotStore(database).apply_snapshot(_snapshot())
+    database.execute("INSERT INTO events(name,start_date) VALUES (?,?)", ("빈 프로젝트", "2026-09-01"))
+
+    event_entry = next(item for item in database.pending_outbox() if item["entity_type"] == "EVENT")
+    encoded = WorkspaceOutbox(database).encode(event_entry)
+
+    assert encoded["operation"] == "EVENT_CREATE_WITH_TASKS"
+    assert encoded["payload"]["name"] == "빈 프로젝트"
+    assert encoded["payload"]["tasks"] == []
+    database.close()
+
+
 def test_structure_outbox_sends_one_event_snapshot_with_all_task_versions(tmp_path: Path) -> None:
     database = WorkspaceDatabase(workspace_database_path(tmp_path, "user", "org"), user_id="user", organization_id="org")
     snapshot = _snapshot() | {"event_tasks": [

@@ -230,7 +230,7 @@ def _assignment_choices(db, event_id):
 
 def export_pdf_from_page(parent, db, event_id, kind, exporter) -> Path | None:
     if not event_id:
-        QMessageBox.information(parent, "행사 선택", "PDF로 내보낼 행사를 선택하세요.")
+        QMessageBox.information(parent, "프로젝트 선택", "PDF로 내보낼 프로젝트를 선택하세요.")
         return None
     major = ""
     if kind == "checklist":
@@ -280,7 +280,7 @@ def export_pdf_from_page(parent, db, event_id, kind, exporter) -> Path | None:
 
 def export_calendar_pdf_from_page(parent, db, event_id, year, month, exporter) -> Path | None:
     if not event_id:
-        QMessageBox.information(parent, "행사 선택", "PDF로 내보낼 행사를 선택하세요.")
+        QMessageBox.information(parent, "프로젝트 선택", "PDF로 내보낼 프로젝트를 선택하세요.")
         return None
     rows = db.query(
         """SELECT DISTINCT major,minor FROM event_tasks

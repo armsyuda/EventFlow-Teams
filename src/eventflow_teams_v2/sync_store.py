@@ -76,7 +76,7 @@ class WorkspaceSnapshotStore:
             for member in staff:
                 conn.execute(
                     "INSERT INTO teams_v2_staff_members(user_id,display_name,role,job_title,color_hex,status) VALUES (?,?,?,?,?,?)",
-                    (str(member.get("user_id") or ""), str(member.get("display_name") or "직원"), str(member.get("role") or "MEMBER"), str(member.get("job_title") or ""), str(member.get("color_hex") or "#A7D7F1"), str(member.get("status") or "ACTIVE")),
+                    (str(member.get("user_id") or ""), str(member.get("display_name") or "직원"), str(member.get("role") or "MEMBER"), str(member.get("job_title") or ""), str(member.get("color_hex") or "#A7D4F0"), str(member.get("status") or "ACTIVE")),
                 )
             for schedule in schedules:
                 conn.execute(
@@ -110,7 +110,7 @@ class WorkspaceSnapshotStore:
             for event in events:
                 cursor = conn.execute(
                     "INSERT INTO events(name,start_date,end_date,location,organizer,budget,budget_tax_mode,pm_vendor_id) VALUES (?,?,?,?,?,?,?,?)",
-                    (str(event.get("name") or "행사"), str(event.get("start_date") or "1970-01-01"), event.get("end_date"), str(event.get("location") or ""), str(event.get("organizer") or ""), event.get("budget"), str(event.get("budget_tax_mode") or "UNSET"), self._local_id("VENDOR", event.get("pm_vendor_id"))),
+                    (str(event.get("name") or "프로젝트"), str(event.get("start_date") or "1970-01-01"), event.get("end_date"), str(event.get("location") or ""), str(event.get("organizer") or ""), event.get("budget"), str(event.get("budget_tax_mode") or "UNSET"), self._local_id("VENDOR", event.get("pm_vendor_id"))),
                 )
                 self._map("EVENT", int(cursor.lastrowid), str(event["id"]), updated_at=str(event.get("updated_at") or ""))
             for task in tasks:
@@ -134,7 +134,7 @@ class WorkspaceSnapshotStore:
             for member in members:
                 self.db.conn.execute(
                     "INSERT INTO teams_v2_staff_members(user_id,display_name,role,job_title,color_hex,status) VALUES (?,?,?,?,?,?)",
-                    (str(member.get("user_id") or ""), str(member.get("display_name") or ""), str(member.get("role") or "MEMBER"), str(member.get("job_title") or ""), str(member.get("color_hex") or "#A7D7F1"), str(member.get("status") or "ACTIVE")),
+                    (str(member.get("user_id") or ""), str(member.get("display_name") or ""), str(member.get("role") or "MEMBER"), str(member.get("job_title") or ""), str(member.get("color_hex") or "#A7D4F0"), str(member.get("status") or "ACTIVE")),
                 )
 
     def apply_changes(self, response: dict[str, Any]) -> int:
@@ -213,7 +213,7 @@ class WorkspaceSnapshotStore:
         self.db.conn.execute(
             "INSERT INTO teams_v2_staff_members(user_id,display_name,role,job_title,color_hex,status) VALUES (?,?,?,?,?,?) "
             "ON CONFLICT(user_id) DO UPDATE SET role=excluded.role,job_title=excluded.job_title,color_hex=excluded.color_hex,status=excluded.status",
-            (user_id, display_name, str(item.get("role") or "MEMBER"), str(item.get("job_title") or ""), str(item.get("color_hex") or "#A7D7F1"), str(item.get("status") or "ACTIVE")),
+            (user_id, display_name, str(item.get("role") or "MEMBER"), str(item.get("job_title") or ""), str(item.get("color_hex") or "#A7D4F0"), str(item.get("status") or "ACTIVE")),
         )
 
     def _upsert_personal_schedule(self, item: dict[str, Any]) -> None:
@@ -250,7 +250,7 @@ class WorkspaceSnapshotStore:
         remote_id = str(item.get("id") or "")
         if not remote_id: return
         local_id = self._mapped_local("EVENT", remote_id)
-        values = (str(item.get("name") or "행사"), str(item.get("start_date") or "1970-01-01"), item.get("end_date"), str(item.get("location") or ""), str(item.get("organizer") or ""), item.get("budget"), str(item.get("budget_tax_mode") or "UNSET"), self._local_id("VENDOR", item.get("pm_vendor_id")))
+        values = (str(item.get("name") or "프로젝트"), str(item.get("start_date") or "1970-01-01"), item.get("end_date"), str(item.get("location") or ""), str(item.get("organizer") or ""), item.get("budget"), str(item.get("budget_tax_mode") or "UNSET"), self._local_id("VENDOR", item.get("pm_vendor_id")))
         if local_id is None:
             cursor = self.db.conn.execute("INSERT INTO events(name,start_date,end_date,location,organizer,budget,budget_tax_mode,pm_vendor_id) VALUES (?,?,?,?,?,?,?,?)", values); local_id = int(cursor.lastrowid)
         else: self.db.conn.execute("UPDATE events SET name=?,start_date=?,end_date=?,location=?,organizer=?,budget=?,budget_tax_mode=?,pm_vendor_id=? WHERE id=?", (*values, local_id))

@@ -19,12 +19,12 @@ class ExcelExportDialog(QDialog):
         root.setSpacing(12)
         title = QLabel("Excel로 내보내기")
         title.setObjectName("SectionTitle")
-        description = QLabel("행사, 문서 종류와 인쇄 형식을 선택하세요.")
+        description = QLabel("프로젝트, 문서 종류와 인쇄 형식을 선택하세요.")
         description.setObjectName("Muted")
         root.addWidget(title)
         root.addWidget(description)
 
-        root.addWidget(QLabel("행사 선택"))
+        root.addWidget(QLabel("프로젝트 선택"))
         self.event_combo = QComboBox()
         for event in db.query("SELECT id,name FROM events ORDER BY start_date,id"):
             self.event_combo.addItem(event["name"], int(event["id"]))

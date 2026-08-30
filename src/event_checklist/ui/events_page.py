@@ -56,7 +56,7 @@ class EventsPage(QWidget):
         top.setSpacing(10)
         title = QLabel("체크리스트")
         title.setObjectName("PageTitle")
-        self.description = QLabel("선택한 행사의 업무 상태와 일정을 관리합니다.")
+        self.description = QLabel("선택한 프로젝트의 업무 상태와 일정을 관리합니다.")
         self.description.setObjectName("PageDescription")
         self.summary = QLabel("")
         self.summary.setObjectName("ChecklistCount")
@@ -68,7 +68,7 @@ class EventsPage(QWidget):
         self.import_button.clicked.connect(self.import_master)
         self.import_button.setProperty("quiet", True)
         top.addWidget(self.import_button)
-        self.edit_event_button = QPushButton("행사 정보 수정")
+        self.edit_event_button = QPushButton("프로젝트 정보 수정")
         self.edit_event_button.clicked.connect(lambda: self.event_id and self.edit_requested.emit(self.event_id))
         self.edit_event_button.setProperty("quiet", True)
         top.addWidget(self.edit_event_button)
@@ -183,7 +183,7 @@ class EventsPage(QWidget):
             return
         self.event_id = event_id
         event = self.service.get_event(event_id) if event_id else None
-        self.description.setText(f"{event['name']}의 업무 상태와 일정을 관리합니다." if event else "행사를 선택하세요.")
+        self.description.setText(f"{event['name']}의 업무 상태와 일정을 관리합니다." if event else "프로젝트를 선택하세요.")
         self.refresh_tasks()
         self._loaded_event_id = event_id
 
@@ -208,7 +208,7 @@ class EventsPage(QWidget):
             QMessageBox.information(
                 self,
                 "기본항목",
-                f"현재 행사에 기본 항목 {total}개가 모두 포함되어 있습니다.\n\n"
+                f"현재 프로젝트에 기본 항목 {total}개가 모두 포함되어 있습니다.\n\n"
                 "설정 > 기본 항목에서 새 항목을 추가하거나, 체크리스트에서 항목을 제외하면 다시 가져올 수 있습니다.",
             )
             return
@@ -310,7 +310,7 @@ class EventsPage(QWidget):
         self.table.reset_spans()
         self.table.setRowCount(0)
         if not self.event_id:
-            self.summary.setText("행사를 선택하세요")
+            self.summary.setText("프로젝트를 선택하세요")
             self.loading = False
             self.table.blockSignals(False)
             self.table.setUpdatesEnabled(True)

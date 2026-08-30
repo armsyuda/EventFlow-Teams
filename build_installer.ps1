@@ -19,7 +19,8 @@ try {
     & (Join-Path $root 'build_windows.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'Teams 실행 파일 빌드에 실패했습니다.' }
   }
-  $version = & $python -c "from event_checklist import __version__; print(__version__)"
+  $version = & $python -c "import sys; sys.path.insert(0, 'src'); from event_checklist import __version__; print(__version__)"
+  if ($LASTEXITCODE -ne 0 -or -not $version) { throw 'Teams 버전 정보를 읽을 수 없습니다.' }
   & $compiler "/DAppVersion=$version" (Join-Path $root 'installer\EventFlowTeams.iss')
   if ($LASTEXITCODE -ne 0) { throw '설치 프로그램 생성에 실패했습니다.' }
   Write-Output "BUILT $(Join-Path $root "release\installer\EventFlowTeams-Setup-$version.exe")"

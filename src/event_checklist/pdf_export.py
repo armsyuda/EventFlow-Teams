@@ -58,7 +58,7 @@ def _short_date(value) -> str:
 
 def _safe_filename(value: str) -> str:
     clean = "".join("_" if char in '<>:"/\\|?*' else char for char in str(value)).strip(" .")
-    return (clean[:80].rstrip(" ._") or "행사")
+    return (clean[:80].rstrip(" ._") or "프로젝트")
 
 
 def default_pdf_filename(event, kind: str, options: PdfOptions = PdfOptions(), printed_on=None,
@@ -225,7 +225,7 @@ class _Document:
         c.fitted_text(title_rect, self.event["name"], 11.5, 6.0, INK, True)
         c.text(r(self.margin, 52, title_w, 10), self.context_label, 5.3, MUTED, True)
         c.line((period_x - 4) * sx, 37 * sy, (period_x - 4) * sx, 52 * sy)
-        c.text(r(period_x, 36, period_w, 16), f"행사기간  {_event_period(self.event)}", 6.5, MUTED, True)
+        c.text(r(period_x, 36, period_w, 16), f"프로젝트 기간  {_event_period(self.event)}", 6.5, MUTED, True)
         c.text(
             r(summary_x, 34, summary_w, 22), summary_text, 5.2 if multiline_summary else 7,
             BRAND_DARK, True, Qt.AlignmentFlag.AlignRight,
@@ -442,7 +442,7 @@ def export_checklist_pdf(db, event_id: int, destination: Path, options: PdfOptio
     service = EventService(db)
     event = service.get_event(event_id)
     if not event:
-        raise ValueError("내보낼 행사를 찾을 수 없습니다.")
+        raise ValueError("내보낼 프로젝트를 찾을 수 없습니다.")
     tasks = [dict(row) for row in service.list_tasks(
         event_id, major=major, vendor_id=vendor_id, pm_assignee_id=pm_assignee_id,
     )]
@@ -455,7 +455,7 @@ def export_checklist_pdf(db, event_id: int, destination: Path, options: PdfOptio
     else:
         scope = "전체"
     context = f"실행 업무 현황 · {scope}"
-    doc = _Document(destination, options, event, "행사 체크리스트", context)
+    doc = _Document(destination, options, event, "프로젝트 체크리스트", context)
     try:
         if options.paper == "A4" and options.orientation == "PORTRAIT":
             _checklist_a4_portrait(doc, tasks)
@@ -566,7 +566,7 @@ def export_calendar_pdf(db, event_id: int, destination: Path, year: int, month: 
     service = EventService(db)
     event = service.get_event(event_id)
     if not event:
-        raise ValueError("내보낼 행사를 찾을 수 없습니다.")
+        raise ValueError("내보낼 프로젝트를 찾을 수 없습니다.")
     first = date(year, month, 1)
     last = date(year, month, calendar.monthrange(year, month)[1])
     tasks = [dict(row) for row in service.calendar_range(
@@ -586,7 +586,7 @@ def export_calendar_pdf(db, event_id: int, destination: Path, year: int, month: 
     summary = _calendar_filter_label(
         major, minor, len(tasks), scope_label, is_pm=pm_assignee_id is not None,
     )
-    doc = _Document(destination, options, event, "행사 달력", f"{year}년 {month}월 일정")
+    doc = _Document(destination, options, event, "프로젝트 달력", f"{year}년 {month}월 일정")
     try:
         for page_index in range(page_count):
             _draw_calendar_page(
@@ -603,7 +603,7 @@ def settlement_header_summary(summary):
     mode = summary["budget_tax_mode"]
     difference = summary["difference"]
     if not budget:
-        return f"전체 행사금액  미입력\n정산 합계  {_money(summary['total'])} · 예산 비교 불가"
+        return f"전체 프로젝트 금액  미입력\n정산 합계  {_money(summary['total'])} · 예산 비교 불가"
     mode_label = "VAT 포함" if mode == "INCLUDED" else ("VAT 별도" if mode == "EXCLUDED" else "VAT 기준 미선택")
     if mode == "EXCLUDED":
         comparison_label = "정산 공급가"
@@ -616,7 +616,7 @@ def settlement_header_summary(summary):
     else:
         difference_text = "예산과 일치" if difference == 0 else f"{_money(abs(difference))} {'남음' if difference > 0 else '부족'}"
     return (
-        f"전체 행사금액({mode_label})  {_money(budget)}\n"
+        f"전체 프로젝트 금액({mode_label})  {_money(budget)}\n"
         f"{comparison_label}  {_money(comparison_value)} · {difference_text}"
     )
 
@@ -644,7 +644,7 @@ def _settlement_columns(options):
     ratios = [.070, .075, .150, .045, .045, .090, .090, .055, .075, .090, .090, .125]
     width = _page_metrics(options)[0] - 52
     return (
-        ["대분류", "중분류", "항목", "수량", "단위", "행사 단가", "공급가", "VAT", "VAT 금액", "합계", "업체", "세부내용"],
+        ["대분류", "중분류", "항목", "수량", "단위", "프로젝트 단가", "공급가", "VAT", "VAT 금액", "합계", "업체", "세부내용"],
         [width * ratio for ratio in ratios],
         False,
     )
@@ -759,8 +759,8 @@ def export_settlement_pdf(db, event_id: int, destination: Path, options: PdfOpti
     summary = service.settlement_summary(event_id)
     event = summary["event"]
     if not event:
-        raise ValueError("내보낼 행사를 찾을 수 없습니다.")
-    doc = _Document(destination, options, event, "행사 정산내역", "공급가 및 VAT 정산")
+        raise ValueError("내보낼 프로젝트를 찾을 수 없습니다.")
+    doc = _Document(destination, options, event, "프로젝트 정산내역", "공급가 및 VAT 정산")
     try:
         _settlement_pdf(doc, summary)
     finally:

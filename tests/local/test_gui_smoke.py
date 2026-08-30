@@ -6,8 +6,8 @@ from time import perf_counter
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QItemSelectionModel, QRect, Qt
-from PySide6.QtWidgets import QApplication, QAbstractItemView, QCalendarWidget, QHeaderView, QLabel, QLineEdit, QListWidget, QMessageBox, QPushButton, QStyleOptionViewItem, QTableWidgetItem, QTableWidgetSelectionRange
+from PySide6.QtCore import QDate, QItemSelectionModel, QRect, Qt
+from PySide6.QtWidgets import QApplication, QAbstractItemView, QCalendarWidget, QComboBox, QHeaderView, QLabel, QLineEdit, QListWidget, QMessageBox, QPushButton, QStyleOptionViewItem, QTableWidgetItem, QTableWidgetSelectionRange
 from PySide6.QtWidgets import QAbstractSpinBox, QDoubleSpinBox
 from PySide6.QtTest import QTest
 
@@ -35,7 +35,7 @@ from event_checklist.ui.startup_splash import StartupSplash
 from event_checklist.theme import ComboPopupPolisher, InteractionCursorPolisher, application_stylesheet
 from event_checklist.ui.widgets import (
     GROUP_MAJOR_ROLE, GROUP_MINOR_ROLE, AppComboBox, CategoryCell, DirectDateEdit, FastEditableTable, UnitComboBox,
-    SpreadsheetItemDelegate, configure_money_spin, configure_quantity_spin, fit_table_to_view,
+    SpreadsheetItemDelegate, _DirectCalendarPopup, configure_money_spin, configure_quantity_spin, fit_table_to_view,
 )
 from event_checklist.units import COMMON_UNITS
 from event_checklist.update_service import UpdateInfo
@@ -90,7 +90,7 @@ def test_new_event_dialog_builds_without_native_crash(tmp_path):
     db = Database(tmp_path / "dialog.db")
     dialog = EventDialog(db.query("SELECT * FROM master_items WHERE active=1 ORDER BY sort_order"))
     assert dialog.tree.topLevelItemCount() == 5
-    assert len(dialog.selected_ids()) == 120
+    assert dialog.selected_ids() == []
     dialog.close(); db.close()
 
 
@@ -145,14 +145,35 @@ def test_calendar_lanes_prioritize_nearest_incomplete_deadlines():
     timeline.set_tasks(rows)
     week = next(week for week in timeline._calendar_weeks() if date(2026, 9, 2) in week)
     visible, hidden = timeline._week_segments(week, 3)
-    assert [segment[1]["name"] for segment in visible] == ["가까운 마감", "첫 번째", "두 번째"]
+    assert [segment[2]["name"] for segment in visible] == ["가까운 마감", "첫 번째", "두 번째"]
     assert sum(hidden) > 0
+    timeline.close()
+
+
+def test_calendar_personal_schedules_use_shared_lanes_and_prioritize_current_member():
+    app = QApplication.instance() or QApplication([]); timeline = MonthTimeline(); timeline.set_month(2026, 8)
+    timeline.set_tasks([
+        {"id": 1, "name": "겹치던 업무", "major": "운영", "sort_order": 1,
+         "planned_start": "2026-08-29", "due_date": "2026-09-02", "status": "진행중"},
+    ])
+    timeline.set_personal_schedules([
+        {"remote_id": "other", "member_user_id": "other-user", "member_name": "다른 직원", "title": "출장", "start_date": "2026-08-29", "end_date": "2026-09-01"},
+        {"remote_id": "mine", "member_user_id": "current-user", "member_name": "나", "title": "여름 휴가", "start_date": "2026-08-29", "end_date": "2026-09-02"},
+    ], priority_member_user_id="current-user")
+    week = next(week for week in timeline._calendar_weeks() if date(2026, 8, 30) in week)
+    visible, hidden = timeline._week_segments(week, 3)
+    assert [(segment[1], segment[2].get("title") or segment[2].get("name")) for segment in visible] == [
+        ("schedule", "여름 휴가"), ("schedule", "출장"), ("task", "겹치던 업무"),
+    ]
+    assert [segment[0] for segment in visible] == [0, 1, 2]
+    assert sum(hidden) == 0
     timeline.close()
 
 
 def test_direct_date_and_money_inputs_have_no_arrow_buttons():
     app = QApplication.instance() or QApplication([])
     date_edit = DirectDateEdit()
+    date_edit.setDate(QDate(2026, 8, 15))
     assert date_edit.findChildren(QCalendarWidget) == []
     date_edit.show()
     QTest.mouseClick(date_edit, Qt.MouseButton.LeftButton)
@@ -161,9 +182,53 @@ def test_direct_date_and_money_inputs_have_no_arrow_buttons():
     money_edit.setRange(0, 999_999_999); money_edit.setValue(50_000_000)
     assert date_edit.property("directCalendar") is True
     assert date_edit.calendarWidget().isVisible()
+    popup = date_edit._direct_calendar
+    calendar = date_edit.calendarWidget()
+    assert calendar.height() == 280
+    assert popup.height() >= calendar.geometry().bottom() + 6
+    assert calendar.adjacent_month_color.name().upper() == "#BAC1CC"
+    previous_month = popup.findChild(QPushButton, "DirectCalendarMonthButton")
+    next_month = popup.findChildren(QPushButton, "DirectCalendarMonthButton")[1]
+    year_combo = popup.findChild(QComboBox, "DirectCalendarYear")
+    assert previous_month is not None and previous_month.isVisible() and previous_month.isEnabled()
+    assert next_month is not None and next_month.isVisible() and next_month.isEnabled()
+    assert year_combo is not None and year_combo.isVisible()
+    assert not year_combo.isEditable()
+    shown_year = calendar.yearShown()
+    assert year_combo.count() == 5
+    assert [year_combo.itemData(index) for index in range(5)] == list(range(shown_year - 2, shown_year + 3))
+    assert year_combo.currentIndex() == 2
+    QTest.mouseClick(year_combo, Qt.MouseButton.LeftButton, pos=year_combo.rect().center()); app.processEvents()
+    assert year_combo.view().isVisible()
+    year_combo.hidePopup()
+    shown_month = calendar.monthShown()
+    next_month.click(); app.processEvents()
+    assert calendar.monthShown() != shown_month
+    year_combo.setCurrentIndex(year_combo.currentIndex() + 1); app.processEvents()
+    assert calendar.yearShown() == shown_year + 1
     assert date_edit.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
     assert money_edit.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.NoButtons
     assert "50,000,000" in money_edit.text()
+    popup.close(); date_edit.close()
+
+
+def test_direct_calendar_keeps_clear_actions_below_the_last_week():
+    app = QApplication.instance() or QApplication([])
+    previous_stylesheet = app.styleSheet()
+    try:
+        app.setStyleSheet(application_stylesheet())
+        popup = _DirectCalendarPopup()
+        popup.set_clear_action("날짜 비우기")
+        popup.show(); app.processEvents()
+
+        assert popup.height() >= popup.root.sizeHint().height()
+        assert popup.clear_button.geometry().top() > popup.calendar.geometry().bottom()
+        assert popup.close_button.geometry().top() > popup.calendar.geometry().bottom()
+        assert popup.clear_button.geometry().bottom() < popup.contentsRect().bottom()
+        assert popup.close_button.geometry().bottom() < popup.contentsRect().bottom()
+    finally:
+        popup.close()
+        app.setStyleSheet(previous_stylesheet)
 
 
 def test_event_card_is_selected_by_click_without_separate_button():
@@ -534,7 +599,7 @@ def test_missing_release_zip_explains_why_update_cannot_start(tmp_path, monkeypa
     monkeypatch.setattr(QMessageBox, "warning", lambda _parent, title, message: shown.update(title=title, message=message))
     window.install_available_update()
     assert shown["title"] == "업데이트 파일 누락"
-    assert "EventFlowTeams-Windows.zip" in shown["message"]
+    assert "EventFlow-Windows.zip" in shown["message"]
     assert "Release 주소" in shown["message"]
     window.close(); db.close()
 
@@ -1156,7 +1221,9 @@ def test_settings_is_separated_and_calendar_header_is_compact(tmp_path):
     previous_style = app.styleSheet(); app.setStyleSheet(application_stylesheet())
     db = Database(tmp_path / "layout.db"); window = MainWindow(db, enable_update_check=False)
     window.resize(1440, 900); window.show(); app.processEvents()
-    assert window.nav_buttons[4].y() > window.nav_buttons[3].y() + window.nav_buttons[3].height() + 100
+    project_bottom = window.nav_buttons[3].mapTo(window.sidebar, window.nav_buttons[3].rect().bottomLeft()).y()
+    settings_top = window.nav_buttons[4].mapTo(window.sidebar, window.nav_buttons[4].rect().topLeft()).y()
+    assert settings_top > project_bottom + 100
     calendar = CalendarPage(window.service, db)
     calendar.resize(1200, 780); calendar.show(); app.processEvents()
     header_centers = [
@@ -1514,6 +1581,9 @@ def test_category_cell_widgets_enable_rename_and_group_move(tmp_path):
     for r, c in cl_cells:
         cell = checklist.table.cellWidget(r, c)
         if isinstance(cell, CategoryCell):
+            assert cell.parentWidget() is checklist.table.viewport()
+            assert cell.label.parentWidget() is cell
+            assert cell.handle.parentWidget() is cell
             if cell._major_only:
                 assert cell.label.text() == cell.major, "대분류 셀은 대분류 이름만 보여야 한다."
             else:

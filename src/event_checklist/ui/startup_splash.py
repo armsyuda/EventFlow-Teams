@@ -31,7 +31,7 @@ class StartupSplash(QWidget):
         mark.setFixedSize(46, 46)
         names = QVBoxLayout(); names.setSpacing(2)
         title = QLabel("이벤트 플로우"); title.setObjectName("SplashTitle")
-        subtitle = QLabel("행사 준비를 더 명확하게"); subtitle.setObjectName("SplashSubtitle")
+        subtitle = QLabel("프로젝트 준비를 더 명확하게"); subtitle.setObjectName("SplashSubtitle")
         names.addWidget(title); names.addWidget(subtitle)
         brand.addWidget(mark); brand.addLayout(names); brand.addStretch()
         layout.addLayout(brand)

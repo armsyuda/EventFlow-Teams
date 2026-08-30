@@ -11,3 +11,5 @@
 - `permissions.py`: 서버 권한 코드를 Local UI의 읽기/편집 가능 상태로 적용
 
 동기화, Realtime, 충돌 처리, 서버 snapshot RPC는 단계 3~4에서 같은 V2 패키지에 추가한다. Local 기준본을 수정하지 않는 원칙을 유지한다.
+
+PySide6 화면 안의 위젯 생성·팝업·독립 창 기준과 자동 회귀 검사는 [GUI 위젯 소유권 가이드](gui-window-ownership-guideline.md)를 따른다.

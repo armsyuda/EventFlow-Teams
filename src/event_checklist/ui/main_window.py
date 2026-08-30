@@ -41,14 +41,19 @@ class UpdateDownloadThread(QThread):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, db, parent=None, enable_update_check: bool = True):
+    def __init__(self, db, parent=None, enable_update_check: bool = True, embedded: bool = False):
         super().__init__(parent)
         self.db = db
         self.service = EventService(db)
         self.selected_event_id: int | None = None
         self.setWindowTitle("이벤트 플로우")
         self.setWindowIcon(app_icon())
-        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        # Teams mounts this shell inside its own window.  Keep that instance a
+        # child widget from its first native handle so Windows never flashes a
+        # separate Local window during the company-to-workspace transition.
+        self.setWindowFlags(
+            Qt.WindowType.Widget if embedded else Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
+        )
         self.resize(1440, 900)
         self.setMinimumSize(1120, 700)
 
@@ -282,7 +287,7 @@ class MainWindow(QMainWindow):
                                                  freelancer_ids=dialog.selected_freelancer_ids(),
                                                  **import_values)
         except Exception as exc:
-            QMessageBox.critical(self, "행사 생성 실패", str(exc)); return
+            QMessageBox.critical(self, "프로젝트 생성 실패", str(exc)); return
         self.select_event(event_id); self.nav_buttons[1].click()
 
     def edit_event(self, event_id):
@@ -299,7 +304,7 @@ class MainWindow(QMainWindow):
                 self.service.update_event(event_id, **dialog.values(), rebase_auto=True)
                 self.service.set_event_participants(event_id, dialog.selected_vendor_ids(), dialog.selected_freelancer_ids())
         except Exception as exc:
-            QMessageBox.critical(self, "행사 수정 실패", str(exc)); return
+            QMessageBox.critical(self, "프로젝트 수정 실패", str(exc)); return
         self.events.invalidate()
         self.settlement.invalidate()
         self.select_event(event_id)
@@ -310,7 +315,7 @@ class MainWindow(QMainWindow):
         event = self.service.get_event(event_id)
         if not event: return
         answer = QMessageBox.warning(
-            self, "행사 삭제 확인", f"'{event['name']}' 행사와 체크리스트를 삭제할까요?\n삭제 전에 필요한 경우 데이터 관리에서 백업하세요.",
+            self, "프로젝트 삭제 확인", f"'{event['name']}' 프로젝트와 체크리스트를 삭제할까요?\n삭제 전에 필요한 경우 데이터 관리에서 백업하세요.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )

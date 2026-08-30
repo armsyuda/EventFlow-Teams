@@ -43,7 +43,7 @@ class EventDialog(QDialog):
         self.source_event_id: int | None = None
         self.copy_settlement_prices = False
         self._tree_source = "masters"
-        self.setWindowTitle("행사 수정" if event else "새 행사")
+        self.setWindowTitle("프로젝트 수정" if event else "프로젝트 생성")
         self.resize(900 if event else 1180, 720)
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 10, 14, 10)
@@ -58,7 +58,7 @@ class EventDialog(QDialog):
         content.addWidget(left_panel, 5)
         root.addLayout(content, 1)
 
-        title = QLabel("행사 기본 정보")
+        title = QLabel("프로젝트 기본 정보")
         title.setObjectName("SectionTitle")
         left.addWidget(title)
         form = QFormLayout()
@@ -89,9 +89,9 @@ class EventDialog(QDialog):
             self.pm_vendor.addItem(vendor["name"], vendor["id"])
         if event:
             self.pm_vendor.setCurrentIndex(max(0, self.pm_vendor.findData(event["pm_vendor_id"])))
-        form.addRow("행사명 *", self.name_edit)
-        form.addRow("행사 시작일 *", self.start_edit)
-        form.addRow("행사 마감일 *", self.end_edit)
+        form.addRow("프로젝트명 *", self.name_edit)
+        form.addRow("프로젝트 시작일 *", self.start_edit)
+        form.addRow("프로젝트 마감일 *", self.end_edit)
         form.addRow("장소", self.location_edit)
         form.addRow("주최 / 주관", self.organizer_edit)
         form.addRow("예산", self.budget_edit)
@@ -118,7 +118,7 @@ class EventDialog(QDialog):
 
         if not event:
             row = QHBoxLayout()
-            guide = QLabel("선택한 업무는 날짜 없이 생성됩니다. 작업 시작일과 마감일은 체크리스트에서 직접 입력하세요.")
+            guide = QLabel("기본 항목은 선택하지 않아도 됩니다. 빈 프로젝트를 만든 뒤 체크리스트에서 필요한 항목을 직접 추가할 수 있습니다.")
             guide.setWordWrap(True)
             guide.setObjectName("InfoGuide")
             left.addWidget(guide)
@@ -127,14 +127,14 @@ class EventDialog(QDialog):
             item_layout = QVBoxLayout(item_panel)
             item_layout.setContentsMargins(16, 16, 16, 16)
             item_layout.setSpacing(10)
-            section = QLabel("행사 항목 선택")
+            section = QLabel("프로젝트 항목 선택 (선택 사항)")
             section.setObjectName("SectionTitle")
             row.addWidget(section)
             row.addStretch()
-            self.previous_button = QPushButton("이전 행사에서 가져오기")
+            self.previous_button = QPushButton("이전 프로젝트에서 가져오기")
             self.previous_button.setEnabled(bool(self.previous_events and self.previous_task_loader))
             self.previous_button.setToolTip(
-                "이전 행사의 항목을 가져옵니다. 담당자, 업체, 일정과 진행상태는 복사하지 않습니다."
+                "이전 프로젝트의 항목을 가져옵니다. 담당자, 업체, 일정과 진행상태는 복사하지 않습니다."
             )
             all_button = QPushButton("전체 선택")
             none_button = QPushButton("전체 해제")
@@ -154,7 +154,7 @@ class EventDialog(QDialog):
             content.addWidget(item_panel, 4)
         else:
             self.tree = None
-            note = QLabel("행사 날짜를 바꿔도 체크리스트에 직접 입력한 작업 일정은 유지됩니다.")
+            note = QLabel("프로젝트 날짜를 바꿔도 체크리스트에 직접 입력한 작업 일정은 유지됩니다.")
             note.setWordWrap(True)
             note.setObjectName("Muted")
             left.addWidget(note)
@@ -180,18 +180,18 @@ class EventDialog(QDialog):
             if major_item is None:
                 major_item = QTreeWidgetItem(self.tree, [major])
                 major_item.setFlags(major_item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
-                major_item.setCheckState(0, Qt.CheckState.Checked)
+                major_item.setCheckState(0, Qt.CheckState.Unchecked)
                 major_items[major] = major_item
             parent = parents.get((major, minor))
             if parent is None:
                 parent = QTreeWidgetItem(major_item, [minor])
                 parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate)
-                parent.setCheckState(0, Qt.CheckState.Checked)
+                parent.setCheckState(0, Qt.CheckState.Unchecked)
                 parents[(major, minor)] = parent
             child = QTreeWidgetItem(parent, [item["name"]])
             child.setData(0, Qt.ItemDataRole.UserRole, item["id"])
             child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            child.setCheckState(0, Qt.CheckState.Checked)
+            child.setCheckState(0, Qt.CheckState.Unchecked)
         self.tree.expandToDepth(1)
 
     def _open_previous_event_import(self) -> None:
@@ -201,7 +201,7 @@ class EventDialog(QDialog):
         source_event_id, copy_prices = chooser.values()
         tasks = list(self.previous_task_loader(source_event_id))
         if not tasks:
-            QMessageBox.information(self, "가져올 항목 없음", "선택한 행사에는 가져올 항목이 없습니다.")
+            QMessageBox.information(self, "가져올 항목 없음", "선택한 프로젝트에는 가져올 항목이 없습니다.")
             return
         self._populate_previous_tree(tasks, source_event_id, copy_prices)
 
@@ -213,7 +213,7 @@ class EventDialog(QDialog):
         mode = "항목 + 정산 단가" if copy_prices else "항목만 · 단가 0원"
         source_name = next(
             (row["name"] for row in self.previous_events if int(row["id"]) == self.source_event_id),
-            "이전 행사",
+            "이전 프로젝트",
         )
         self.tree.setHeaderLabels([f"{source_name}  |  {mode}"])
         parents: dict[tuple[str, str], QTreeWidgetItem] = {}
@@ -312,19 +312,16 @@ class EventDialog(QDialog):
     def _validate(self) -> None:
         values = self.values()
         if not values["name"]:
-            QMessageBox.warning(self, "입력 확인", "행사명을 입력하세요.")
+            QMessageBox.warning(self, "입력 확인", "프로젝트명을 입력하세요.")
             self.name_edit.setFocus()
             return
         if values["end_date"] < values["start_date"]:
-            QMessageBox.warning(self, "입력 확인", "행사 마감일은 행사 시작일보다 빠를 수 없습니다.")
+            QMessageBox.warning(self, "입력 확인", "프로젝트 마감일은 프로젝트 시작일보다 빠를 수 없습니다.")
             self.end_edit.setFocus()
             return
         if values["budget"] and values["budget_tax_mode"] == "UNSET":
             QMessageBox.warning(self, "입력 확인", "총예산이 있으면 부가세 포함 또는 별도를 선택하세요.")
             self.budget_tax_mode.setFocus()
-            return
-        if self.tree is not None and not self.selected_ids():
-            QMessageBox.warning(self, "입력 확인", "하나 이상의 항목을 선택하세요.")
             return
         self.accept()
 
@@ -335,12 +332,12 @@ from PySide6.QtWidgets import QTreeWidgetItemIterator  # noqa: E402
 class PreviousEventImportDialog(QDialog):
     def __init__(self, events, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("이전 행사에서 가져오기")
+        self.setWindowTitle("이전 프로젝트에서 가져오기")
         self.resize(520, 300)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(14)
-        title = QLabel("기준이 될 이전 행사를 선택하세요")
+        title = QLabel("기준이 될 이전 프로젝트를 선택하세요")
         title.setObjectName("SectionTitle")
         layout.addWidget(title)
         self.event_combo = AppComboBox()
@@ -357,7 +354,7 @@ class PreviousEventImportDialog(QDialog):
         self.item_only = QRadioButton("항목만 가져오기")
         self.item_only.setToolTip("항목 구조를 가져오고 단가는 모두 0원으로 시작합니다.")
         self.with_settlement = QRadioButton("항목과 정산 가져오기")
-        self.with_settlement.setToolTip("항목 구조와 이전 행사의 단가를 가져옵니다.")
+        self.with_settlement.setToolTip("항목 구조와 이전 프로젝트의 단가를 가져옵니다.")
         self.item_only.setChecked(True)
         self.mode_group = QButtonGroup(self)
         self.mode_group.addButton(self.item_only)
@@ -465,7 +462,7 @@ class CustomTaskDialog(QDialog):
         self.vat.addItem("면세", "EXEMPT")
         for label, widget in [("대분류 *", self.major), ("중분류 *", self.minor), ("항목 *", self.name),
                               ("세부내용", self.detail),
-                              ("수량", self.quantity), ("단위", self.unit), ("행사 단가", self.price), ("VAT", self.vat)]:
+                              ("수량", self.quantity), ("단위", self.unit), ("프로젝트 단가", self.price), ("VAT", self.vat)]:
             form.addRow(label, widget)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
@@ -609,7 +606,7 @@ class MasterItemDialog(QDialog):
         form.addRow("기본 업체", self.vendor)
         form.addRow("기본 담당", self.assignee)
         layout.addLayout(form)
-        guide = QLabel("작업 시작일과 마감일은 행사를 만든 뒤 체크리스트에서 직접 입력합니다.")
+        guide = QLabel("작업 시작일과 마감일은 프로젝트를 만든 뒤 체크리스트에서 직접 입력합니다.")
         guide.setObjectName("InfoGuide"); guide.setWordWrap(True); layout.addWidget(guide)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save)
         buttons.accepted.connect(self._accept)
@@ -754,7 +751,7 @@ class TaskDetailsDialog(QDialog):
         self.quantity.setValue(task["quantity"] or 0)
         self.unit = UnitComboBox(task["unit"] or "식", choices=unit_choices)
         self.note = QTextEdit(task["note"])
-        self.note.setPlaceholderText("이 행사에서만 사용하는 메모를 입력하세요.")
+        self.note.setPlaceholderText("이 프로젝트에서만 사용하는 메모를 입력하세요.")
         self.note.setMaximumHeight(140)
         form.addRow("세부내용", self.detail)
         form.addRow("수량", self.quantity)

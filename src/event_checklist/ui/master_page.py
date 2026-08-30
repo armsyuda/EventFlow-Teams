@@ -24,7 +24,7 @@ class MasterPage(QWidget):
         root.setSpacing(16)
         title = QLabel("기본 항목")
         title.setObjectName("PageTitle")
-        description = QLabel("새 행사에 복사될 기본 업무를 관리합니다. 기존 행사는 바뀌지 않습니다.")
+        description = QLabel("새 프로젝트에 복사될 기본 업무를 관리합니다. 기존 프로젝트는 바뀌지 않습니다.")
         description.setObjectName("PageDescription")
         if not embedded:
             root.addWidget(title)
@@ -78,7 +78,7 @@ class MasterPage(QWidget):
         self.table.cellChanged.connect(self._cell_changed)
         self.table.cellDoubleClicked.connect(self._open_cell_editor)
         root.addWidget(self.table, 1)
-        note = QLabel("기본 항목에는 일정 규칙을 저장하지 않습니다. 행사별 작업 시작일과 마감일은 체크리스트에서 직접 입력합니다.")
+        note = QLabel("기본 항목에는 일정 규칙을 저장하지 않습니다. 프로젝트별 작업 시작일과 마감일은 체크리스트에서 직접 입력합니다.")
         note.setObjectName("InfoGuide"); note.setWordWrap(True)
         root.addWidget(note)
         self.refresh()
@@ -291,7 +291,7 @@ class MasterPage(QWidget):
         name = self.table.item(row, 3).text()
         answer = QMessageBox.warning(
             self, "기본 항목 삭제 확인",
-            f"'{name}'을(를) 기본 항목에서 삭제할까요?\n이미 생성된 행사의 업무는 그대로 유지됩니다.",
+            f"'{name}'을(를) 기본 항목에서 삭제할까요?\n이미 생성된 프로젝트의 업무는 그대로 유지됩니다.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )

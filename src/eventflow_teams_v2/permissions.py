@@ -48,9 +48,9 @@ class TeamsPermissionController:
 
     def apply(self) -> None:
         local = self.window
-        self._set_button_text(local.dashboard, "+ 새 행사", self.allows("events.create"), "프로젝트 만들기 권한이 없습니다.")
-        self._set_button_text(local.dashboard, "행사 정보 수정", self.allows("events.edit"), "프로젝트 수정 권한이 없습니다.")
-        self._set_button_text(local.dashboard, "행사 삭제", self.allows("events.archive"), "프로젝트 보관 권한이 없습니다.")
+        self._set_button_text(local.dashboard, "+ 프로젝트 생성", self.allows("events.create"), "프로젝트 만들기 권한이 없습니다.")
+        self._set_button_text(local.dashboard, "프로젝트 정보 수정", self.allows("events.edit"), "프로젝트 수정 권한이 없습니다.")
+        self._set_button_text(local.dashboard, "프로젝트 삭제", self.allows("events.archive"), "프로젝트 보관 권한이 없습니다.")
 
         self._set_button(local.events.import_button, self.allows("checklist.structure"), "체크리스트 구조 변경 권한이 없습니다.")
         self._set_button(local.events.edit_event_button, self.allows("events.edit"), "프로젝트 수정 권한이 없습니다.")

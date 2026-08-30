@@ -59,15 +59,13 @@ class WorkspaceOutbox:
         if entity == "EVENT":
             if operation == "LOCAL_DELETE":
                 if not remote_id:
-                    raise DeferredMutation("아직 서버에 없는 행사입니다.")
+                    raise DeferredMutation("아직 서버에 없는 프로젝트입니다.")
                 return {"mutation_id": mutation_id, "operation": "EVENT_ARCHIVE", "payload": {"id": remote_id, "expected_updated_at": updated_at}}
             row = self.db.one("SELECT * FROM events WHERE id=?", (local_id,))
             if not row:
-                raise DeferredMutation("행사 원본을 찾을 수 없습니다.")
+                raise DeferredMutation("프로젝트 원본을 찾을 수 없습니다.")
             if not remote_id:
                 task_rows = self.db.query("SELECT * FROM event_tasks WHERE event_id=? ORDER BY sort_order,id", (local_id,))
-                if not task_rows:
-                    raise DeferredMutation("업무가 없는 새 행사는 아직 서버에 보낼 수 없습니다.")
                 tasks = [{"master_item_id": self._remote_reference("MASTER_ITEM", task["master_item_id"]), "major": task["major"], "minor": task["minor"], "name": task["name"], "detail": task["detail"], "required": bool(task["required"]), "status": task["status"], "priority": self._priority(task["priority"]), "quantity": task["quantity"], "unit": task["unit"], "assignee_id": self._remote_reference("PERSON", task["assignee_id"]), "pm_assignee_id": self._remote_reference("PERSON", task["pm_assignee_id"]), "vendor_id": self._remote_reference("VENDOR", task["vendor_id"]), "planned_start": task["planned_start"], "due_date": task["due_date"], "unit_price": task["unit_price"], "vat_type": task["vat_type"], "is_removed": bool(task["is_removed"]), "removed_reason": task["removed_reason"], "note": task["note"], "completed_at": task["completed_at"], "sort_order": task["sort_order"]} for task in task_rows]
                 vendors = self.db.query("SELECT vendor_id FROM event_vendors WHERE event_id=?", (local_id,))
                 freelancers = self.db.query("SELECT person_id FROM event_freelancers WHERE event_id=?", (local_id,))
@@ -105,7 +103,7 @@ class WorkspaceOutbox:
                     raise DeferredMutation("새 업무 원본을 찾을 수 없습니다.")
                 event_id = self._remote_reference("EVENT", row["event_id"])
                 if not event_id:
-                    raise DeferredMutation("서버 행사 생성이 완료된 뒤 업무를 전송합니다.")
+                    raise DeferredMutation("서버 프로젝트 생성이 완료된 뒤 업무를 전송합니다.")
                 return {"mutation_id": mutation_id, "operation": "TASK_CREATE", "payload": {"event_id": event_id, "major": row["major"], "minor": row["minor"], "name": row["name"], "detail": row["detail"]}}
             if operation == "LOCAL_DELETE":
                 raise DeferredMutation("업무 영구 삭제 서버 계약은 아직 연결되지 않았습니다.")
@@ -123,7 +121,7 @@ class WorkspaceOutbox:
             if operation == "LOCAL_TASK_STRUCTURE":
                 event_id = self._remote_reference("EVENT", row["event_id"])
                 if not event_id:
-                    raise DeferredMutation("서버 행사 생성이 완료된 뒤 업무 구조를 전송합니다.")
+                    raise DeferredMutation("서버 프로젝트 생성이 완료된 뒤 업무 구조를 전송합니다.")
                 rows = self.db.query("SELECT * FROM event_tasks WHERE event_id=? ORDER BY sort_order,id", (row["event_id"],))
                 tasks: list[dict[str, Any]] = []
                 for task in rows:
@@ -137,7 +135,7 @@ class WorkspaceOutbox:
         if entity == "EVENT_PARTICIPANTS":
             event_id = self._remote_reference("EVENT", local_id)
             if not event_id:
-                raise DeferredMutation("서버 행사 생성이 완료된 뒤 참여자를 전송합니다.")
+                raise DeferredMutation("서버 프로젝트 생성이 완료된 뒤 참여자를 전송합니다.")
             event = self.db.one("SELECT pm_vendor_id FROM events WHERE id=?", (local_id,))
             vendors = self.db.query("SELECT vendor_id FROM event_vendors WHERE event_id=?", (local_id,))
             freelancers = self.db.query("SELECT person_id FROM event_freelancers WHERE event_id=?", (local_id,))

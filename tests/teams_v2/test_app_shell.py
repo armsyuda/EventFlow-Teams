@@ -2,8 +2,8 @@ from pathlib import Path
 import time
 from unittest.mock import Mock
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QPushButton, QTableWidgetItem
+from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtWidgets import QApplication, QPushButton, QTableWidgetItem, QWidget
 
 from eventflow_teams_v2.api import Organization
 from eventflow_teams_v2.app import _update_health_file
@@ -12,6 +12,21 @@ from eventflow_teams_v2.staff_pages import EmployeeWorkPage
 from eventflow_teams_v2.config import TeamsV2Config
 from eventflow_teams_v2.session import Session
 from eventflow_teams_v2.workspace import WorkspaceDatabase, workspace_database_path
+
+
+class _CompanyChoiceShowProbe(QObject):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parents_at_show: list[QWidget | None] = []
+
+    def eventFilter(self, watched, event):  # noqa: N802 - Qt API
+        if (
+            event.type() == QEvent.Type.Show
+            and isinstance(watched, QWidget)
+            and watched.objectName() == "TeamsCompanyChoice"
+        ):
+            self.parents_at_show.append(watched.parentWidget())
+        return False
 
 
 def test_company_lookup_failure_offers_retry_without_forcing_logout(tmp_path: Path) -> None:
@@ -78,9 +93,29 @@ def test_company_selection_uses_one_direct_button_per_company() -> None:
 
     assert len(page.company_buttons) == 1
     assert page.company_buttons[0].text() == "JMT"
+    assert page.company_buttons[0].parentWidget() is page.company_list
+    assert not page.company_buttons[0].isWindow()
     page.company_buttons[0].click()
     assert selected == ["jmt"]
     page.deleteLater()
+
+
+def test_company_choice_never_shows_as_an_independent_window() -> None:
+    app = QApplication.instance() or QApplication([])
+    page = OrganizationPage(Mock())
+    probe = _CompanyChoiceShowProbe()
+    app.installEventFilter(probe)
+    try:
+        page.show()
+        app.processEvents()
+        page._loaded([Organization("jmt", "JMT", "OWNER")])
+        app.processEvents()
+        assert probe.parents_at_show == [page.company_list]
+        assert page.company_buttons[0].window() is page.window()
+    finally:
+        app.removeEventFilter(probe)
+        page.close()
+        page.deleteLater()
 
 
 def test_employee_work_page_has_explicit_staff_refresh() -> None:
@@ -142,6 +177,9 @@ def test_company_selection_opens_local_ui_against_v2_workspace(tmp_path: Path, m
     assert window.workspace_db.path == tmp_path / "workspaces" / "user-a" / "org-a" / "data" / "event_checklist.db"
     assert window.stack.currentWidget() is window.local_window
     assert window.local_window is not None and window.local_window.isEnabled()
+    assert window.local_window.parentWidget() is window.stack
+    assert window.local_window.windowType() == Qt.WindowType.Widget
+    assert window.local_window not in QApplication.topLevelWidgets()
     assert window.sync_text.text() == "동기화 완료"
     assert not hasattr(window, "company_text")
     assert not hasattr(window, "account_menu")
