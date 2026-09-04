@@ -979,9 +979,16 @@ class TeamsV2Window(QMainWindow):
                 self.workspace_db.conn.execute("UPDATE event_tasks SET assigned_member_user_id=? WHERE id=?", (saved.get("assigned_member_user_id"), int(task["id"])))
                 self.workspace_db.conn.execute("UPDATE teams_v2_entity_map SET remote_version=?,remote_updated_at=? WHERE entity_type='EVENT_TASK' AND local_id=?", (int(saved.get("row_version") or mapping["remote_version"]), str(saved.get("updated_at") or ""), int(task["id"])))
             self.workspace_db.conn.commit()
-            if self.local_window:
-                self.local_window.refresh_all(self.local_window.selected_event_id)
-                if transfer: self._show_toast("업무를 이관했습니다. 담당자에게 알림을 보냈습니다.")
+            if self.company_workspace:
+                self.company_workspace.apply_changes({"cursor": self.company_workspace.cursor(), "changes": [{"entity_type": "WORK_ITEM", "entity_key": str(saved.get("id") or mapping["remote_id"]), "operation": "UPSERT", "payload": saved}]})
+            if self.company_calendar_page:
+                self.company_calendar_page.refresh()
+            if self.local_window and hasattr(self.local_window, "staff_work_page"):
+                self.local_window.staff_work_page.refresh()
+            if hasattr(self, "my_space_page"):
+                self.my_space_page.refresh()
+            if transfer:
+                self._show_toast("업무를 이관했습니다. 담당자에게 알림을 보냈습니다.")
             return True
         except ApiError as exc:
             QMessageBox.warning(self.local_window, "업무 이관 실패" if transfer else "담당자 지정 실패", str(exc))

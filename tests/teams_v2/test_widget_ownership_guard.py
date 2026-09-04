@@ -15,25 +15,14 @@ from pathlib import Path
 SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
 UI_TREES = (SOURCE_ROOT / "eventflow_teams_v2", SOURCE_ROOT / "event_checklist")
 
-# These two paths intentionally open independent windows: the update progress
-# window and the last-resort startup error window.  Every other widget must be
-# owned before it is made visible.
+# These paths intentionally open independent windows: update progress, the
+# application window, and the last-resort startup error window.  Function names
+# are stable when nearby source lines move; line-number allowlists are not.
 TOP_LEVEL_WINDOW_ALLOWLIST = {
-    ("eventflow_teams_v2/app.py", 1164, "StartupSplash"),
-    ("eventflow_teams_v2/app.py", 1482, "QMainWindow"),
-    # App code grows as Teams-only pages are added.  These remain intentional
-    # independent windows (not embedded child widgets).
-    ("eventflow_teams_v2/app.py", 1256, "StartupSplash"),
-    ("eventflow_teams_v2/app.py", 1574, "QMainWindow"),
-    ("eventflow_teams_v2/app.py", 1235, "StartupSplash"),
-    ("eventflow_teams_v2/app.py", 1553, "QMainWindow"),
-    ("eventflow_teams_v2/app.py", 1226, "StartupSplash"),
-    ("eventflow_teams_v2/app.py", 1544, "QMainWindow"),
-    ("eventflow_teams_v2/app.py", 1275, "StartupSplash"),
-    ("eventflow_teams_v2/app.py", 1593, "QMainWindow"),
-    ("event_checklist/app.py", 89, "MainWindow"),
-    ("event_checklist/ui/main_window.py", 385, "StartupSplash"),
-    ("event_checklist/ui/main_window.py", 380, "StartupSplash"),
+    ("eventflow_teams_v2/app.py", "_download_and_apply_update", "StartupSplash"),
+    ("eventflow_teams_v2/app.py", "main", "QMainWindow"),
+    ("event_checklist/app.py", "main", "MainWindow"),
+    ("event_checklist/ui/main_window.py", "install_available_update", "StartupSplash"),
 }
 
 QT_WIDGET_BASES = {
@@ -151,7 +140,7 @@ def _violations_for_function(
             visible = not (isinstance(node.args[0], ast.Constant) and node.args[0].value is False)
         if visible and receiver in ownership and not ownership[receiver][0]:
             widget_class = ownership[receiver][1]
-            if (relative_path, node.lineno, widget_class) not in TOP_LEVEL_WINDOW_ALLOWLIST:
+            if (relative_path, function.name, widget_class) not in TOP_LEVEL_WINDOW_ALLOWLIST:
                 violations.append(f"{relative_path}:{node.lineno} {receiver}.{method}() before ownership")
     return violations
 

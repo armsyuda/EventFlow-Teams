@@ -1,10 +1,12 @@
 from pathlib import Path
 import time
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTableWidgetItem, QWidget
 
+from event_checklist.ui.main_window import MainWindow
 from eventflow_teams_v2.api import Organization
 from eventflow_teams_v2.app import _update_health_file
 from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, OrganizationPage, TeamsV2Window
@@ -161,6 +163,49 @@ def test_employee_work_page_has_explicit_staff_refresh() -> None:
     page.staff_refresh_finished()
     assert page.refresh_button.isEnabled()
     page.deleteLater()
+
+
+def test_refresh_all_keeps_the_current_checklist_page(tmp_path: Path) -> None:
+    QApplication.instance() or QApplication([])
+    database = WorkspaceDatabase(workspace_database_path(tmp_path, "user-a", "org-a"), user_id="user-a", organization_id="org-a")
+    event_id = database.conn.execute("INSERT INTO events(name,start_date) VALUES(?,?)", ("프로젝트", "2026-09-04")).lastrowid
+    database.conn.commit()
+    window = MainWindow(database, enable_update_check=False)
+    window.select_event(event_id)
+    window.nav_buttons[1].click()
+
+    assert window.stack.currentWidget() is window.events
+    window.refresh_all(event_id)
+
+    assert window.selected_event_id == event_id
+    assert window.stack.currentWidget() is window.events
+    assert window.nav_buttons[1].isChecked()
+    window.close(); database.close()
+
+
+def test_member_assignment_refreshes_dependents_without_leaving_checklist(tmp_path: Path) -> None:
+    database = WorkspaceDatabase(workspace_database_path(tmp_path, "user-a", "org-a"), user_id="user-a", organization_id="org-a")
+    CompanyWorkspace(database)
+    event_id = database.conn.execute("INSERT INTO events(name,start_date) VALUES(?,?)", ("프로젝트", "2026-09-04")).lastrowid
+    task_id = database.conn.execute("INSERT INTO event_tasks(event_id,major,minor,name,status,sort_order) VALUES(?,?,?,?,?,?)", (event_id, "운영", "일반", "업무", "미착수", 1)).lastrowid
+    database.conn.execute("INSERT INTO teams_v2_entity_map(entity_type,local_id,remote_id,remote_version) VALUES(?,?,?,?)", ("EVENT_TASK", task_id, "remote-task", 1))
+    database.conn.commit()
+    saved = {"id": "remote-task", "event_id": "remote-event", "work_scope": "PROJECT", "work_kind": "CHECKLIST", "major": "운영", "minor": "일반", "name": "업무", "status": "미착수", "assigned_member_user_id": "staff-b", "row_version": 2}
+    local_window = Mock(); local_window.staff_work_page = Mock()
+    shell = SimpleNamespace(
+        current_organization=SimpleNamespace(id="org-a"), workspace_db=database,
+        company_workspace=CompanyWorkspace(database), api=Mock(assign_task_member=Mock(return_value=saved)),
+        local_window=local_window, company_calendar_page=Mock(), my_space_page=Mock(), _show_toast=Mock(),
+    )
+    task = dict(database.one("SELECT * FROM event_tasks WHERE id=?", (task_id,)))
+
+    assert TeamsV2Window._save_task_member(shell, task, "staff-b", transfer=False)
+    local_window.refresh_all.assert_not_called()
+    local_window.staff_work_page.refresh.assert_called_once()
+    shell.company_calendar_page.refresh.assert_called_once()
+    shell.my_space_page.refresh.assert_called_once()
+    assert database.one("SELECT assigned_member_user_id FROM event_tasks WHERE id=?", (task_id,))["assigned_member_user_id"] == "staff-b"
+    database.close()
 
 
 def test_company_management_cards_keep_compact_actions_on_the_right() -> None:

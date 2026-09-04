@@ -339,7 +339,11 @@ class MainWindow(QMainWindow):
             self.settlement.invalidate()
             QTimer.singleShot(30, lambda eid=self.selected_event_id: self._preload_settlement(eid))
 
-    def refresh_all(self, event_id=None): self.select_event(event_id)
+    def refresh_all(self, event_id=None):
+        """Refresh data without changing the page the user is working on."""
+        if event_id is not None:
+            self.selected_event_id = int(event_id)
+        self._refresh_after_history_change()
 
     def check_updates(self):
         if self.update_check_thread and self.update_check_thread.isRunning(): return
