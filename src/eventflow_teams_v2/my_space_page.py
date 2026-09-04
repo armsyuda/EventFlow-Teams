@@ -2,21 +2,55 @@ from __future__ import annotations
 
 from typing import Callable
 
+import json
+
 from PySide6.QtCore import QDate, QSize, Qt
 from PySide6.QtWidgets import QAbstractItemView, QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSizePolicy, QStackedWidget, QTextEdit, QVBoxLayout, QWidget
 
 from event_checklist.ui.widgets import DirectDateEdit
+from eventflow_teams_v2.work_card import TASK_MIME, WorkCard, WorkDetailDialog
+
+
+class WorkPriorityList(QListWidget):
+    """Card-aware reorder list; child widgets no longer swallow dragging."""
+
+    def __init__(self, save_order, parent=None):
+        super().__init__(parent); self.save_order = save_order; self.setAcceptDrops(True); self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly); self.setAutoScroll(True); self.setAutoScrollMargin(56)
+
+    def dragEnterEvent(self, event):  # noqa: N802
+        if event.mimeData().hasFormat(TASK_MIME): event.acceptProposedAction()
+        else: super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):  # noqa: N802
+        if event.mimeData().hasFormat(TASK_MIME): event.acceptProposedAction(); self.viewport().update()
+        else: super().dragMoveEvent(event)
+
+    def dropEvent(self, event):  # noqa: N802
+        if not event.mimeData().hasFormat(TASK_MIME): return super().dropEvent(event)
+        try: payload=json.loads(bytes(event.mimeData().data(TASK_MIME)).decode("utf-8"))
+        except (ValueError,UnicodeDecodeError): event.ignore(); return
+        if payload.get("source")!="my-space": event.ignore(); return
+        task_id=str(payload.get("task_id") or ""); source=next((i for i in range(self.count()) if str(self.item(i).data(Qt.ItemDataRole.UserRole) or "")==task_id),-1)
+        if source<0: event.ignore(); return
+        target=self.indexAt(event.position().toPoint()).row(); target=self.count()-1 if target<0 else target
+        if target!=source:
+            source_item=self.item(source); widget=self.itemWidget(source_item); self.removeItemWidget(source_item); item=self.takeItem(source); target=max(0,min(target,self.count())); self.insertItem(target,item)
+            if widget is not None: self.setItemWidget(item,widget)
+            if not self.save_order(): event.ignore(); return
+        event.acceptProposedAction()
 
 
 class MySpacePage(QWidget):
     """One place for a member's checklist, project-additional, and company work."""
 
-    def __init__(self, db, user_id: str, save_schedule: Callable[[dict, str | None], bool], delete_schedule: Callable[[dict], bool], reorder_schedules: Callable[[list[str]], None], reorder_tasks: Callable[[list[str]], None], save_task: Callable[[str, dict], bool], save_company_work: Callable[[dict, dict | None], bool], delete_company_work: Callable[[dict], bool], save_project_work: Callable[[dict, dict | None], bool], delete_project_work: Callable[[dict], bool], claim_checklist_work: Callable[[dict], bool], can_manage_company_work: bool = True, parent=None):
+    def __init__(self, db, user_id: str, save_schedule: Callable[[dict, str | None], bool], delete_schedule: Callable[[dict], bool], reorder_schedules: Callable[[list[str]], None], reorder_tasks: Callable[[list[str]], None], save_task: Callable[[str, dict], bool], save_company_work: Callable[[dict, dict | None], bool], delete_company_work: Callable[[dict], bool], save_project_work: Callable[[dict, dict | None], bool], delete_project_work: Callable[[dict], bool], claim_checklist_work: Callable[[dict], bool], can_manage_company_work: bool = True, parent=None, open_task: Callable[[str], None] | None = None):
         super().__init__(parent)
         self.db, self.user_id = db, user_id
         self.save_schedule, self.delete_schedule, self.reorder_schedules, self.reorder_tasks = save_schedule, delete_schedule, reorder_schedules, reorder_tasks
         self.save_task, self.save_company_work, self.delete_company_work = save_task, save_company_work, delete_company_work
         self.save_project_work, self.delete_project_work, self.claim_checklist_work = save_project_work, delete_project_work, claim_checklist_work
+        self.open_task = open_task
         self.can_manage_company_work = can_manage_company_work
         self._suppress = False
         self._editing_work: dict | None = None
@@ -28,7 +62,7 @@ class MySpacePage(QWidget):
         columns = QHBoxLayout(); columns.setSpacing(16); root.addLayout(columns, 1)
         left, right = self._column(), self._column(); self.management_column = right; columns.addWidget(left, 11); columns.addWidget(right, 9)
         left_layout = left.layout(); left_layout.addWidget(QLabel("내 업무 우선순위", objectName="SectionTitle")); left_layout.addWidget(QLabel("⋮⋮ 손잡이를 잡아 끌면 급한 순서로 바꿀 수 있습니다. 이 순서는 나에게만 적용됩니다.", objectName="Muted"))
-        self.tasks = self._sortable_list(self._save_task_order, "MySpaceTaskList"); self.tasks.itemDoubleClicked.connect(self._open_work_from_priority); left_layout.addWidget(self.tasks, 1)
+        self.tasks = WorkPriorityList(self._save_task_order); self.tasks.setObjectName("MySpaceTaskList"); self._style_list(self.tasks,"MySpaceTaskList"); left_layout.addWidget(self.tasks, 1)
 
         right_layout = right.layout(); right_layout.addWidget(QLabel("개인 관리", objectName="SectionTitle"))
         tabs = QHBoxLayout(); tabs.setSpacing(8); self.work_tab = self._tab_button("업무", "work"); self.schedule_tab = self._tab_button("개인 일정", "schedule"); tabs.addWidget(self.work_tab); tabs.addWidget(self.schedule_tab); tabs.addStretch(); right_layout.addLayout(tabs)
@@ -123,6 +157,11 @@ class MySpacePage(QWidget):
         view = QListWidget(); view.setObjectName(object_name); view.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove); view.setDefaultDropAction(Qt.DropAction.MoveAction); view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection); view.setSpacing(8); view.setUniformItemSizes(False); view.setStyleSheet(f"QListWidget#{object_name}{{background:transparent;border:none;outline:0;}} QListWidget#{object_name}::item{{background:transparent;border:none;}}")
         view.model().rowsMoved.connect(lambda *_args: None if self._suppress else callback()); return view
 
+    @staticmethod
+    def _style_list(view: QListWidget, object_name: str) -> None:
+        view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection); view.setSpacing(10); view.setUniformItemSizes(False)
+        view.setStyleSheet(f"QListWidget#{object_name}{{background:#F8FAFC;border:none;border-radius:12px;outline:0;padding:8px;}} QListWidget#{object_name}::item{{background:transparent;border:none;padding:0;}} QListWidget#{object_name}::item:selected{{background:transparent;border:none;}}")
+
     def refresh(self) -> None:
         self._suppress = True
         color = self.db.one("SELECT color_hex FROM teams_v2_staff_members WHERE user_id=?", (self.user_id,)); selected_color = str(color["color_hex"]) if color else "#A7D4F0"; self.management_column.setStyleSheet(f"QFrame#MySpaceColumn{{background:#FFFFFF;border:2px solid {selected_color};border-radius:16px;}}")
@@ -131,12 +170,14 @@ class MySpacePage(QWidget):
             item = QListWidgetItem(); item.setData(Qt.ItemDataRole.UserRole, str(schedule["id"])); item.setSizeHint(QSize(0, 104)); self.schedules.addItem(item); self.schedules.setItemWidget(item, self._schedule_card(dict(schedule)))
         if not self.schedules.count(): self._empty(self.schedules, "등록한 개인 일정이 없습니다.")
         priority = {str(row["event_task_id"]): int(row["sort_order"]) for row in self.db.query("SELECT * FROM teams_v2_my_task_priorities")}
-        tasks = self.db.query("""SELECT w.remote_id,w.event_id,w.work_scope,w.work_kind,w.major,w.name,w.status,w.due_date,w.sort_order,w.created_by,w.assigned_member_user_id,COALESCE(e.name,'프로젝트') event_name
+        tasks = self.db.query("""SELECT w.remote_id,w.event_id,w.work_scope,w.work_kind,w.major,w.name,w.detail,w.status,w.planned_start,w.due_date,w.sort_order,w.created_by,w.assigned_member_user_id,COALESCE(e.name,'프로젝트') event_name,
+          COALESCE(member.display_name,'담당자 미지정') assignee_name
           FROM teams_v3_work_items w LEFT JOIN teams_v2_entity_map map ON map.entity_type='EVENT' AND map.remote_id=w.event_id LEFT JOIN events e ON e.id=map.local_id
+          LEFT JOIN teams_v2_staff_members member ON member.user_id=w.assigned_member_user_id
           WHERE w.assigned_member_user_id=? AND w.is_removed=0 AND w.status NOT IN ('완료','해당없음') ORDER BY COALESCE(w.due_date,'9999-12-31'),w.sort_order""", (self.user_id,))
         tasks = sorted(tasks, key=lambda row: (priority.get(str(row["remote_id"]), 10**9), str(row["due_date"] or "9999-12-31"), int(row["sort_order"])))
         for task in tasks:
-            item = QListWidgetItem(); item.setData(Qt.ItemDataRole.UserRole, str(task["remote_id"])); item.setSizeHint(QSize(0, 108)); self.tasks.addItem(item); self.tasks.setItemWidget(item, self._task_card(dict(task)))
+            item = QListWidgetItem(); item.setData(Qt.ItemDataRole.UserRole, str(task["remote_id"])); item.setSizeHint(QSize(0, 104)); self.tasks.addItem(item); card=self._task_card(dict(task)); self.tasks.setItemWidget(item,card)
         if not self.tasks.count(): self._empty(self.tasks, "현재 등록·배정된 업무가 없습니다.")
         self._suppress = False
 
@@ -166,14 +207,12 @@ class MySpacePage(QWidget):
         edit = QPushButton("수정"); edit.setProperty("compact", True); edit.clicked.connect(lambda: self._load_schedule_form(schedule)); remove = QPushButton("삭제"); remove.setProperty("compact", True); remove.clicked.connect(lambda: self._confirm_delete(remove, schedule, self.delete_schedule)); row.addWidget(edit); row.addWidget(remove); return card
 
     def _task_card(self, task: dict) -> QWidget:
-        card = QFrame(); card.setStyleSheet("QFrame{background:#FFFFFF;border:1px solid #DCE5EF;border-radius:12px;} QFrame:hover{border-color:#98A2B3;background:#FCFDFE;}"); row = QHBoxLayout(card); row.setContentsMargins(10, 10, 12, 10); row.setSpacing(8); row.addWidget(self._handle()); text = QVBoxLayout(); text.setSpacing(3)
-        kind = str(task.get("work_kind") or ("COMPANY_SELF" if task.get("work_scope")=="COMPANY" else "CHECKLIST")); label = "사내 업무" if kind == "COMPANY_SELF" else f"{task['event_name']} · 프로젝트 추가 업무" if kind == "PROJECT_ADDITIONAL" else f"{task['event_name']} · 체크리스트"
-        text.addWidget(QLabel(label, objectName="Muted")); name = QLabel(str(task["name"]), objectName="CalendarTaskName"); name.setWordWrap(True); text.addWidget(name); text.addWidget(QLabel(f"{task['status']}  ·  {task['due_date'] or '마감일 미입력'}", objectName="Muted")); row.addLayout(text, 1)
-        own = kind in {"COMPANY_SELF", "PROJECT_ADDITIONAL"} and str(task.get("created_by") or self.user_id) == self.user_id
-        if own:
-            edit = QPushButton("수정"); edit.setProperty("compact", True); edit.clicked.connect(lambda: self._load_own_work_form(task)); remove = QPushButton("삭제"); remove.setProperty("compact", True); remove.clicked.connect(lambda: self._confirm_delete(remove, task, self._delete_own_work)); row.addWidget(edit); row.addWidget(remove)
-        else: row.addWidget(QLabel("더블클릭하여 상세 보기", objectName="Muted"))
-        return card
+        return WorkCard(task,open_detail=self._show_task_detail,drag_payload={"source":"my-space","task_id":str(task.get("remote_id") or "")})
+
+    def _show_task_detail(self, task: dict) -> None:
+        kind=str(task.get("work_kind") or "CHECKLIST"); own=kind in {"COMPANY_SELF","PROJECT_ADDITIONAL"} and str(task.get("created_by") or self.user_id)==self.user_id
+        dialog=WorkDetailDialog(task,on_open=(lambda:self.open_task(str(task.get("remote_id") or ""))) if kind=="CHECKLIST" and self.open_task else None,on_edit=(lambda:self._load_own_work_form(task)) if own else None,parent=self)
+        dialog.exec()
 
     def _load_own_work_form(self, task: dict) -> None:
         kind = str(task.get("work_kind") or ""); self._editing_work = task; self._select_management("work"); self._set_work_scope("COMPANY" if kind == "COMPANY_SELF" else "PROJECT")
@@ -207,10 +246,6 @@ class MySpacePage(QWidget):
     def _delete_own_work(self, task: dict) -> bool:
         return self.delete_project_work(task) if str(task.get("work_kind") or "") == "PROJECT_ADDITIONAL" else self.delete_company_work(task)
 
-    def _open_work_from_priority(self, item: QListWidgetItem) -> None:
-        task_id = str(item.data(Qt.ItemDataRole.UserRole) or ""); task = self.db.one("SELECT * FROM teams_v3_work_items WHERE remote_id=?", (task_id,))
-        if task and str(task["work_kind"] or "") in {"COMPANY_SELF", "PROJECT_ADDITIONAL"}: self._load_own_work_form(dict(task))
-
     def _load_schedule_form(self, schedule: dict) -> None:
         self._editing_schedule = schedule; self._select_management("schedule"); self.schedule_title.setText(str(schedule.get("title") or "")); self.schedule_start.setDate(QDate.fromString(str(schedule.get("start_date") or QDate.currentDate().toString("yyyy-MM-dd")), "yyyy-MM-dd")); self.schedule_end.setDate(QDate.fromString(str(schedule.get("end_date") or QDate.currentDate().toString("yyyy-MM-dd")), "yyyy-MM-dd")); self.schedule_content.setPlainText(str(schedule.get("private_content") or "")); self.schedule_submit.setText("일정 수정 저장"); self.schedule_cancel.setText("수정 취소")
 
@@ -233,6 +268,6 @@ class MySpacePage(QWidget):
         values = [str(self.schedules.item(index).data(Qt.ItemDataRole.UserRole)) for index in range(self.schedules.count()) if self.schedules.item(index).data(Qt.ItemDataRole.UserRole)]
         if values: self.reorder_schedules(values)
 
-    def _save_task_order(self) -> None:
+    def _save_task_order(self) -> bool:
         values = [str(self.tasks.item(index).data(Qt.ItemDataRole.UserRole)) for index in range(self.tasks.count()) if self.tasks.item(index).data(Qt.ItemDataRole.UserRole)]
-        if values: self.reorder_tasks(values)
+        return bool(values and self.reorder_tasks(values))

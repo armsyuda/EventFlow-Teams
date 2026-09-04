@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTableWidgetItem, QWidget
+from PySide6.QtTest import QTest
 
 from event_checklist.ui.main_window import MainWindow
 from eventflow_teams_v2.api import Organization
@@ -18,6 +19,16 @@ from eventflow_teams_v2.staff_pages import EmployeeWorkPage
 from eventflow_teams_v2.config import TeamsV2Config
 from eventflow_teams_v2.session import Session
 from eventflow_teams_v2.workspace import WorkspaceDatabase, workspace_database_path
+from eventflow_teams_v2.work_card import WorkCard
+
+
+def test_unified_work_card_opens_detail_from_the_whole_card() -> None:
+    app=QApplication.instance() or QApplication([]); opened=[]
+    card=WorkCard({"id":"task-a","name":"현장 확인","work_kind":"CHECKLIST","status":"미착수"},open_detail=lambda task:opened.append(task["id"]),drag_payload=None)
+    card.resize(320,100); card.show(); app.processEvents(); QTest.mouseDClick(card,Qt.MouseButton.LeftButton); app.processEvents()
+    assert opened==["task-a"]
+    assert not any(label.text()=="더블클릭하여 상세 보기" for label in card.findChildren(QLabel))
+    card.close(); card.deleteLater()
 
 
 class _CompanyChoiceShowProbe(QObject):

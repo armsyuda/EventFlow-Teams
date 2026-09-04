@@ -335,6 +335,14 @@ class TeamsV2Api:
     def reorder_my_tasks(self, organization_id: str, task_ids: list[str]) -> None:
         self.rpc("teams_v2_reorder_my_tasks", {"target_organization_id": organization_id, "ordered_task_ids": task_ids}, "내 업무 우선순위를 저장할 수 없습니다.")
 
+    def staff_task_priorities(self, organization_id: str) -> list[dict[str, Any]]:
+        payload=self.rpc("teams_v2_staff_task_priorities",{"target_organization_id":organization_id},"직원 업무 순서를 불러올 수 없습니다.")
+        return payload if isinstance(payload,list) else []
+
+    def move_member_task(self, organization_id: str, task_id: str, member_user_id: str, position: int, expected_row_version: int | None) -> dict[str, Any]:
+        payload=self.rpc("teams_v2_move_member_task",{"target_organization_id":organization_id,"target_task_id":task_id,"target_member_user_id":member_user_id,"target_position":position,"expected_row_version":expected_row_version},"업무를 이동할 수 없습니다.")
+        return payload if isinstance(payload,dict) else {}
+
     def save_member_profile(self, organization_id: str, user_id: str, color_hex: str | None = None, job_title: str | None = None) -> None:
         self.rpc("teams_v2_save_member_profile", {"target_organization_id": organization_id, "target_user_id": user_id, "target_color_hex": color_hex, "target_job_title": job_title}, "직원 정보를 저장할 수 없습니다.")
 

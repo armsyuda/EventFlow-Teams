@@ -635,9 +635,10 @@ class TeamsV2Window(QMainWindow):
                 (self.api.session.user_id, self.api.session.email.split("@", 1)[0], organization.role, "", "#A7D4F0"),
             )
             self.workspace_db.conn.commit()
-        staff_page = EmployeeWorkPage(self.workspace_db, local.open_teams_task, self.api.session.user_id, organization.role in {"OWNER", "ADMIN"}, self._transfer_task_member, self._refresh_staff_directory, local)
+        staff_page = EmployeeWorkPage(self.workspace_db, self._open_v3_task, self.api.session.user_id, organization.role in {"OWNER", "ADMIN"}, self._transfer_task_member, self._refresh_staff_directory, local)
         local.install_teams_staff_page(staff_page)
-        self.my_space_page = MySpacePage(self.workspace_db, self.api.session.user_id, self._save_personal_schedule_values, self._delete_personal_schedule, self._reorder_my_schedules, self._reorder_my_tasks, self._save_my_task_details, self._save_my_company_work, self._delete_my_company_work, self._save_my_project_work, self._delete_my_project_work, self._claim_my_checklist_work, organization.role != "GUEST", local)
+        QTimer.singleShot(0,self._refresh_staff_priorities)
+        self.my_space_page = MySpacePage(self.workspace_db, self.api.session.user_id, self._save_personal_schedule_values, self._delete_personal_schedule, self._reorder_my_schedules, self._reorder_my_tasks, self._save_my_task_details, self._save_my_company_work, self._delete_my_company_work, self._save_my_project_work, self._delete_my_project_work, self._claim_my_checklist_work, organization.role != "GUEST", local, open_task=self._open_v3_task)
         local.stack.addWidget(self.my_space_page)
         my_button = QPushButton("나의 공간"); local.add_company_global_nav_button(my_button)
         my_button.clicked.connect(lambda: self._show_v3_page(self.my_space_page, my_button))
@@ -798,6 +799,7 @@ class TeamsV2Window(QMainWindow):
             if self.company_calendar_page: self.company_calendar_page.refresh()
             if self.local_window and hasattr(self.local_window, "staff_work_page"):
                 self.local_window.staff_work_page.refresh()
+                self._refresh_staff_priorities()
             if hasattr(self, "my_space_page"): self.my_space_page.refresh()
             if self._v3_initial_open and self.company_calendar_page and self.local_window:
                 self._v3_initial_open = False
@@ -885,16 +887,19 @@ class TeamsV2Window(QMainWindow):
         except ApiError as exc:
             self._show_toast(f"개인 일정 순서 저장 실패: {exc}")
 
-    def _reorder_my_tasks(self, task_ids: list[str]) -> None:
+    def _reorder_my_tasks(self, task_ids: list[str]) -> bool:
         if not self.current_organization or not self.workspace_db:
-            return
+            return False
         try:
             self.api.reorder_my_tasks(self.current_organization.id, task_ids)
             self.workspace_db.conn.execute("DELETE FROM teams_v2_my_task_priorities")
             self.workspace_db.conn.executemany("INSERT INTO teams_v2_my_task_priorities(event_task_id,sort_order) VALUES (?,?)", [(task_id, index) for index, task_id in enumerate(task_ids, 1)])
             self.workspace_db.conn.commit()
+            return True
         except ApiError as exc:
             self._show_toast(f"내 업무 순서 저장 실패: {exc}")
+            if hasattr(self,"my_space_page"): self.my_space_page.refresh()
+            return False
 
     def _save_my_task_details(self, task_id: str, values: dict) -> bool:
         if not self.workspace_db or not self.company_workspace:
@@ -1009,7 +1014,7 @@ class TeamsV2Window(QMainWindow):
     def _assign_task_member(self, task, member_user_id) -> bool:
         return self._save_task_member(task, member_user_id, transfer=False)
 
-    def _transfer_task_member(self, task_id: str, member_user_id: str) -> bool:
+    def _transfer_task_member(self, task_id: str, member_user_id: str, position: int=1) -> bool:
         if not self.workspace_db:
             return False
         # V3 company-wide cards keep their server UUID.  Queue that explicit
@@ -1020,17 +1025,35 @@ class TeamsV2Window(QMainWindow):
             if not task or not self.company_workspace or not self.current_organization:
                 return False
             try:
-                saved = self.api.transfer_task_member(self.current_organization.id, str(task_id), str(member_user_id), int(task["row_version"] or 0))
+                response=self.api.move_member_task(self.current_organization.id,str(task_id),str(member_user_id),int(position),int(task["row_version"] or 0))
+                saved=response.get("task") if isinstance(response,dict) else None
+                if not isinstance(saved,dict): raise ApiError("업무 이동 결과를 확인할 수 없습니다.")
                 self.company_workspace.apply_changes({"cursor": self.company_workspace.cursor(), "changes": [{"entity_type": "WORK_ITEM", "entity_key": str(task_id), "operation": "UPSERT", "payload": saved}]})
+                self._refresh_staff_priorities()
                 if self.local_window and hasattr(self.local_window, "staff_work_page"): self.local_window.staff_work_page.refresh()
                 if self.company_calendar_page: self.company_calendar_page.refresh()
+                if hasattr(self,"my_space_page"): self.my_space_page.refresh()
+                if str(response.get("previous_member_user_id") or "")!=str(member_user_id): self._show_toast("업무를 이관하고 담당자들에게 알림을 보냈습니다.")
                 return True
             except ApiError as exc:
-                QMessageBox.warning(self.local_window, "업무 이관 실패", str(exc)); return False
+                QMessageBox.warning(self.local_window, "업무 이동 실패", str(exc));
+                if self.local_window and hasattr(self.local_window,"staff_work_page"): self.local_window.staff_work_page.refresh()
+                return False
         task = self.workspace_db.one("SELECT * FROM event_tasks WHERE id=?", (int(task_id),))
         if not task:
             return False
         return self._save_task_member(task, member_user_id, transfer=True)
+
+    def _refresh_staff_priorities(self) -> None:
+        if not self.current_organization or not self.local_window or not hasattr(self.local_window,"staff_work_page") or not self.local_window.staff_work_page.can_transfer: return
+        if getattr(self,"staff_priority_worker",None) and self.staff_priority_worker.isRunning(): return
+        oid=self.current_organization.id; self.staff_priority_worker=Worker(lambda:self.api.staff_task_priorities(oid))
+        self.staff_priority_worker.finished.connect(lambda values,organization_id=oid:self._staff_priorities_loaded(organization_id,values))
+        self.staff_priority_worker.start()
+
+    def _staff_priorities_loaded(self, organization_id: str, values: object) -> None:
+        if not self.current_organization or self.current_organization.id!=organization_id or not self.local_window or not hasattr(self.local_window,"staff_work_page") or not isinstance(values,list): return
+        self.local_window.staff_work_page.set_priorities([row for row in values if isinstance(row,dict)]); self.local_window.staff_work_page.refresh()
 
     def _save_task_member(self, task, member_user_id, transfer: bool) -> bool:
         if not self.current_organization or not self.workspace_db:

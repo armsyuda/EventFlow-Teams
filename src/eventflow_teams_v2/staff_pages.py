@@ -3,61 +3,68 @@ from __future__ import annotations
 from datetime import date
 from typing import Callable
 
-from PySide6.QtCore import QDate, QMimeData, QPoint, Qt
-from PySide6.QtGui import QDrag
+import json
+
+from PySide6.QtCore import QDate, QEasingCurve, QPropertyAnimation, Qt
 from PySide6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QTextEdit, QVBoxLayout, QWidget, QLineEdit
 from event_checklist.ui.widgets import DirectDateEdit
+from eventflow_teams_v2.work_card import TASK_MIME, WorkCard, WorkDetailDialog
 
 
 ROLE_LABELS = {"OWNER": "대표", "ADMIN": "관리자", "PM": "PM", "MEMBER": "직원", "VIEWER": "조회자"}
 
 
-class WorkTaskCard(QFrame):
-    def __init__(self, task, open_task: Callable[[int], None], draggable: bool, parent=None):
-        super().__init__(parent); self.task = task; self.open_task = open_task; self.draggable = draggable; self._drag_origin: QPoint | None = None
-        self.setObjectName("StaffTaskCard"); self.setMinimumHeight(72)
-        self.setStyleSheet("QFrame#StaffTaskCard{background:#F8FAFC;border:1px solid #E2E8F0;border-radius:9px;} QFrame#StaffTaskCard:hover{border-color:#94A3B8;background:#FFFFFF;}")
-        row = QHBoxLayout(self); row.setContentsMargins(11, 8, 11, 8); row.setSpacing(10)
-        text = QVBoxLayout(); text.setSpacing(2)
-        kind = str(task["work_kind"] or ("COMPANY_SELF" if task["work_scope"] == "COMPANY" else "CHECKLIST"))
-        kind_label = {"CHECKLIST": "체크리스트 업무", "PROJECT_ADDITIONAL": "프로젝트 추가 업무", "COMPANY_SELF": "사내 업무"}.get(kind, "업무")
-        text.addWidget(QLabel(f"{task['event_name']} · {kind_label}", objectName="Muted"))
-        text.addWidget(QLabel(f"[{task['major']}] {task['name']}"))
-        due = str(task["due_date"] or "마감일 미입력")
-        text.addWidget(QLabel(f"{task['status']} · {due}", objectName="Muted")); row.addLayout(text, 1)
-        if draggable:
-            handle = QLabel("⋮⋮"); handle.setObjectName("Muted"); handle.setToolTip("다른 직원 카드로 끌어 업무 이관"); row.addWidget(handle)
-
-    def mousePressEvent(self, event):  # noqa: N802
-        if event.button() == Qt.MouseButton.LeftButton: self._drag_origin = event.pos()
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):  # noqa: N802
-        if not self.draggable or not self._drag_origin or not (event.buttons() & Qt.MouseButton.LeftButton):
-            return super().mouseMoveEvent(event)
-        if (event.pos() - self._drag_origin).manhattanLength() < 8: return
-        data = QMimeData(); data.setText(str(self.task["id"])); drag = QDrag(self); drag.setMimeData(data); drag.exec(Qt.DropAction.MoveAction)
-
-    def mouseReleaseEvent(self, event):  # noqa: N802
-        if self._drag_origin and (event.pos() - self._drag_origin).manhattanLength() < 8:
-            try: self.open_task(int(self.task["id"]))
-            except (TypeError, ValueError): pass  # company V3 rows have a remote UUID, not a Local row id
-        self._drag_origin = None; super().mouseReleaseEvent(event)
-
-
 class StaffWorkCard(QFrame):
-    def __init__(self, member, can_transfer: bool, on_transfer: Callable[[str, str], bool] | None, parent=None):
-        super().__init__(parent); self.member = member; self.can_transfer = can_transfer; self.on_transfer = on_transfer
-        self.setObjectName("StaffWorkCard"); self.setAcceptDrops(can_transfer)
+    def __init__(self, member, parent=None):
+        super().__init__(parent); self.member = member; self.setObjectName("StaffWorkCard")
 
-    def dragEnterEvent(self, event):  # noqa: N802
-        if self.can_transfer and event.mimeData().hasText(): event.acceptProposedAction()
 
-    def dropEvent(self, event):  # noqa: N802
-        if not self.can_transfer or not self.on_transfer: return
-        task_id = event.mimeData().text().strip()
-        if not task_id: return
-        if self.on_transfer(task_id, str(self.member["user_id"])): event.acceptProposedAction()
+class StaffTaskLane(QWidget):
+    def __init__(self, member_id: str, can_move: bool, on_move, parent=None):
+        super().__init__(parent); self.member_id=member_id; self.can_move=can_move; self.on_move=on_move; self.cards=[]
+        self.setAcceptDrops(can_move); self.setObjectName("StaffTaskLane"); self.setStyleSheet("QWidget#StaffTaskLane{background:transparent;border:2px solid transparent;border-radius:10px;}")
+        self.box=QVBoxLayout(self); self.box.setContentsMargins(2,2,2,2); self.box.setSpacing(10); self.box.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.indicator=QFrame(); self.indicator.setFixedHeight(4); self.indicator.setStyleSheet("background:#F4511E;border-radius:2px;"); self.indicator.hide(); self.indicator_position=1; self._indicator_animation=None
+
+    def add_task(self, card: QWidget) -> None:
+        self.cards.append(card); self.box.addWidget(card)
+
+    def dragEnterEvent(self,event):  # noqa: N802
+        if not self.can_move or not event.mimeData().hasFormat(TASK_MIME): return
+        try: payload=json.loads(bytes(event.mimeData().data(TASK_MIME)).decode("utf-8"))
+        except (ValueError,UnicodeDecodeError): event.ignore(); return
+        if payload.get("work_kind")=="COMPANY_SELF" and str(payload.get("member_user_id"))!=self.member_id:
+            self.setToolTip("사내 업무는 다른 직원에게 이관할 수 없습니다."); event.ignore(); return
+        self.setStyleSheet("QWidget#StaffTaskLane{background:#FFF8F3;border:2px dashed #F4511E;border-radius:10px;}"); event.acceptProposedAction()
+
+    def dragMoveEvent(self,event):  # noqa: N802
+        if self.can_move and event.mimeData().hasFormat(TASK_MIME):
+            try: payload=json.loads(bytes(event.mimeData().data(TASK_MIME)).decode("utf-8"))
+            except (ValueError,UnicodeDecodeError): event.ignore(); return
+            position=self._drop_position(event.position().y(),str(payload.get("task_id") or ""))
+            if position!=self.indicator_position or not self.indicator.isVisible():
+                self.box.removeWidget(self.indicator); self.box.insertWidget(position-1,self.indicator); self.indicator_position=position; self.indicator.show()
+                self._indicator_animation=QPropertyAnimation(self.indicator,b"maximumHeight",self); self._indicator_animation.setDuration(150); self._indicator_animation.setStartValue(1); self._indicator_animation.setEndValue(10); self._indicator_animation.setEasingCurve(QEasingCurve.Type.OutCubic); self._indicator_animation.start()
+            event.acceptProposedAction()
+
+    def dragLeaveEvent(self,event):  # noqa: N802
+        self.indicator.hide(); self.box.removeWidget(self.indicator); self.setStyleSheet("QWidget#StaffTaskLane{background:transparent;border:2px solid transparent;border-radius:10px;}"); super().dragLeaveEvent(event)
+
+    def dropEvent(self,event):  # noqa: N802
+        self.setStyleSheet("QWidget#StaffTaskLane{background:transparent;border:2px solid transparent;border-radius:10px;}")
+        try: payload=json.loads(bytes(event.mimeData().data(TASK_MIME)).decode("utf-8"))
+        except (ValueError,UnicodeDecodeError): event.ignore(); return
+        if payload.get("source")!="staff": event.ignore(); return
+        if payload.get("work_kind")=="COMPANY_SELF" and str(payload.get("member_user_id"))!=self.member_id: event.ignore(); return
+        position=self._drop_position(event.position().y(),str(payload.get("task_id") or "")); self.indicator.hide(); self.box.removeWidget(self.indicator)
+        if self.on_move(str(payload.get("task_id") or ""),self.member_id,position): event.acceptProposedAction()
+        else: event.ignore()
+
+    def _drop_position(self,y: float,dragged_task_id: str) -> int:
+        candidates=[card for card in self.cards if str(getattr(card,"task",{}).get("id") or "")!=dragged_task_id]
+        for index,card in enumerate(candidates):
+            if y<card.geometry().center().y(): return index+1
+        return len(candidates)+1
 
 
 class StaffHorizontalScroll(QScrollArea):
@@ -74,8 +81,8 @@ class StaffHorizontalScroll(QScrollArea):
 class EmployeeWorkPage(QWidget):
     """Company-visible checklist, project-additional, and company work board."""
 
-    def __init__(self, db, open_task: Callable[[int], None], current_user_id: str = "", can_transfer: bool = False, on_transfer: Callable[[str, str], bool] | None = None, on_refresh_staff: Callable[[], None] | None = None, parent=None):
-        super().__init__(parent); self.db = db; self.open_task = open_task; self.current_user_id = current_user_id; self.can_transfer = can_transfer; self.on_transfer = on_transfer; self.on_refresh_staff = on_refresh_staff
+    def __init__(self, db, open_task: Callable[[str], None], current_user_id: str = "", can_transfer: bool = False, on_transfer: Callable[[str, str, int], bool] | None = None, on_refresh_staff: Callable[[], None] | None = None, parent=None):
+        super().__init__(parent); self.db = db; self.open_task = open_task; self.current_user_id = current_user_id; self.can_transfer = can_transfer; self.on_transfer = on_transfer; self.on_refresh_staff = on_refresh_staff; self.priorities: dict[str,dict[str,int]]={}
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 32); root.setSpacing(12)
         root.addWidget(QLabel("직원업무", objectName="PageTitle"))
         root.addWidget(QLabel("직원별 체크리스트·프로젝트 추가 업무·사내 업무를 확인합니다. 휴가·출장 같은 개인 일정은 전체 달력에서 확인합니다.", objectName="PageDescription"))
@@ -104,7 +111,7 @@ class EmployeeWorkPage(QWidget):
                 ELSE 5
             END, display_name, user_id""")
         for member in staff:
-            card = StaffWorkCard(member, self.can_transfer, self.on_transfer); card.setFixedWidth(300); card.setFixedHeight(690); card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            card = StaffWorkCard(member); card.setFixedWidth(300); card.setFixedHeight(690); card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             card.setStyleSheet(f"QFrame#StaffWorkCard{{background:#fff;border:1px solid {member['color_hex']};border-top:6px solid {member['color_hex']};border-radius:12px;}}")
             layout = QVBoxLayout(card); layout.setContentsMargins(16, 13, 16, 16); layout.setSpacing(9)
             display_name = str(member["display_name"] or "").strip()
@@ -115,13 +122,13 @@ class EmployeeWorkPage(QWidget):
             completed = self._member_work(str(member["user_id"]), completed=True)
             layout.addWidget(QLabel(f"진행 업무 {len(active)}건", objectName="Muted"))
             task_scroll = QScrollArea(); task_scroll.setObjectName("StaffCardTaskScroll"); task_scroll.setWidgetResizable(True); task_scroll.setFrameShape(QFrame.Shape.NoFrame); task_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff); task_scroll.setStyleSheet("QScrollArea#StaffCardTaskScroll{background:transparent;border:none;} QScrollArea#StaffCardTaskScroll > QWidget > QWidget{background:transparent;} QScrollBar:vertical{width:10px;background:transparent;} QScrollBar::handle:vertical{min-height:36px;background:#CBD5E1;border-radius:5px;} QScrollBar::handle:vertical:hover{background:#94A3B8;}")
-            task_canvas = QWidget(); task_canvas.setStyleSheet("background:transparent;"); task_layout = QVBoxLayout(task_canvas); task_layout.setContentsMargins(0, 0, 2, 0); task_layout.setSpacing(8); task_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-            for task in active: task_layout.addWidget(self._task_card(task))
+            task_canvas = StaffTaskLane(str(member["user_id"]),self.can_transfer,self.on_transfer); task_layout=task_canvas.box
+            for task in active: task_canvas.add_task(self._task_card(task,str(member["user_id"])))
             if not active: task_layout.addWidget(QLabel("진행 중인 업무가 없습니다.", objectName="EmptyState"))
             if completed:
                 toggle = QPushButton(f"완료 항목 보기 · {len(completed)}건"); toggle.setProperty("quiet", True); task_layout.addWidget(toggle)
                 done_box = QWidget(); done_layout = QVBoxLayout(done_box); done_layout.setContentsMargins(0, 0, 0, 0); done_layout.setSpacing(5)
-                for task in completed: done_layout.addWidget(self._task_card(task))
+                for task in completed: done_layout.addWidget(self._task_card(task,str(member["user_id"]),draggable=False))
                 done_box.hide(); toggle.clicked.connect(lambda checked=False, box=done_box, button=toggle, count=len(completed): (box.setVisible(not box.isVisible()), button.setText(("완료 항목 숨기기" if box.isVisible() else "완료 항목 보기") + f" · {count}건")))
                 task_layout.addWidget(done_box)
             task_layout.addStretch(); task_scroll.setWidget(task_canvas); layout.addWidget(task_scroll, 1)
@@ -152,10 +159,21 @@ class EmployeeWorkPage(QWidget):
         self.refresh_button.setEnabled(True); self.refresh_button.setText("직원 목록 새로고침")
         self.refresh()
 
-    def _task_card(self, task):
+    def set_priorities(self, values: list[dict]) -> None:
+        self.priorities={}
+        for row in values:
+            self.priorities.setdefault(str(row.get("member_user_id") or ""),{})[str(row.get("event_task_id") or "")]=int(row.get("sort_order") or 0)
+
+    def _task_card(self, task, member_id: str, draggable: bool=True):
         # A company-work item is self-owned by policy.  Even managers must
         # not drag it onto another employee's card as a forced assignment.
-        return WorkTaskCard(task, self.open_task, self.can_transfer and str(task["work_scope"] or "") != "COMPANY")
+        movable=self.can_transfer and draggable
+        payload={"source":"staff","task_id":str(task["id"]),"member_user_id":member_id,"work_kind":str(task["work_kind"] or "CHECKLIST")} if movable else None
+        return WorkCard(dict(task),open_detail=self._show_task_detail,drag_payload=payload,show_handle=movable)
+
+    def _show_task_detail(self, task: dict) -> None:
+        kind=str(task.get("work_kind") or "CHECKLIST")
+        WorkDetailDialog(task,on_open=(lambda:self.open_task(str(task.get("id") or ""))) if kind=="CHECKLIST" else None,parent=self).exec()
 
     def _member_work(self, user_id: str, *, completed: bool):
         """Prefer the V3 mirror so a colleague's cross-project work is visible."""
@@ -165,15 +183,19 @@ class EmployeeWorkPage(QWidget):
             if scope == "__COMPANY__": filter_sql, args = " AND w.work_scope='COMPANY'", (user_id,)
             elif scope: filter_sql, args = " AND w.event_id=?", (user_id, scope)
             else: filter_sql, args = "", (user_id,)
-            return self.db.query(f"""SELECT w.remote_id id,w.name,w.major,w.status,w.due_date,w.work_scope,w.work_kind,
-                COALESCE(e.name,CASE WHEN w.work_scope='COMPANY' THEN '사내 업무' ELSE '프로젝트' END) event_name
+            rows=self.db.query(f"""SELECT w.remote_id id,w.name,w.major,w.detail,w.status,w.planned_start,w.due_date,w.work_scope,w.work_kind,w.row_version,w.assigned_member_user_id,
+                COALESCE(e.name,CASE WHEN w.work_scope='COMPANY' THEN '사내 업무' ELSE '프로젝트' END) event_name,
+                COALESCE(member.display_name,'담당자 미지정') assignee_name
                 FROM teams_v3_work_items w LEFT JOIN teams_v2_entity_map map ON map.entity_type='EVENT' AND map.remote_id=w.event_id
-                LEFT JOIN events e ON e.id=map.local_id WHERE w.assigned_member_user_id=? AND w.is_removed=0 AND {condition}{filter_sql}
+                LEFT JOIN events e ON e.id=map.local_id LEFT JOIN teams_v2_staff_members member ON member.user_id=w.assigned_member_user_id WHERE w.assigned_member_user_id=? AND w.is_removed=0 AND {condition}{filter_sql}
                 ORDER BY COALESCE(w.due_date,'9999-12-31'),w.sort_order""", args)
+            priority=self.priorities.get(user_id,{})
+            return sorted(rows,key=lambda row:(priority.get(str(row["id"]),10**9),str(row["due_date"] or "9999-12-31"),str(row["id"])))
         except Exception:
             condition = "t.status='완료'" if completed else "t.status NOT IN ('완료','해당없음')"
-            return self.db.query(f"""SELECT t.id,t.name,t.major,t.status,t.due_date,t.work_scope,'CHECKLIST' work_kind,e.name event_name FROM event_tasks t
-                JOIN events e ON e.id=t.event_id WHERE t.assigned_member_user_id=? AND t.is_removed=0 AND {condition}
+            return self.db.query(f"""SELECT t.id,t.name,t.major,t.detail,t.status,t.planned_start,t.due_date,'PROJECT' work_scope,'CHECKLIST' work_kind,e.name event_name,t.assigned_member_user_id,
+                0 row_version,COALESCE(member.display_name,'담당자 미지정') assignee_name FROM event_tasks t
+                JOIN events e ON e.id=t.event_id LEFT JOIN teams_v2_staff_members member ON member.user_id=t.assigned_member_user_id WHERE t.assigned_member_user_id=? AND t.is_removed=0 AND {condition}
                 ORDER BY COALESCE(t.due_date,'9999-12-31'),t.sort_order""", (user_id,))
 
 

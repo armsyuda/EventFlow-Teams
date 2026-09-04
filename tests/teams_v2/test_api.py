@@ -94,6 +94,20 @@ def test_v2_transfer_and_notifications_use_dedicated_rpcs(tmp_path: Path, monkey
     assert [url.rsplit("/", 1)[-1] for url, _ in calls] == ["teams_v2_transfer_task_member", "teams_v2_pop_task_transfer_notifications"]
 
 
+def test_staff_positioned_move_uses_atomic_rpc(tmp_path: Path, monkeypatch) -> None:
+    responses=iter([_Response([{"member_user_id":"staff-b","event_task_id":"task","sort_order":1}]),_Response({"task":{"id":"task"},"target_position":2})])
+    calls=[]
+    def post(url,**kwargs): calls.append((url.rsplit("/",1)[-1],kwargs["json"])); return next(responses)
+    monkeypatch.setattr("eventflow_teams_v2.api.requests.post",post)
+    api=TeamsV2Api(TeamsV2Config("https://example.supabase.co","publishable",tmp_path),Session("token","refresh","owner"))
+    assert api.staff_task_priorities("org")[0]["event_task_id"]=="task"
+    assert api.move_member_task("org","task","staff-b",2,7)["target_position"]==2
+    assert calls==[
+        ("teams_v2_staff_task_priorities",{"target_organization_id":"org"}),
+        ("teams_v2_move_member_task",{"target_organization_id":"org","target_task_id":"task","target_member_user_id":"staff-b","target_position":2,"expected_row_version":7}),
+    ]
+
+
 def test_unified_notification_rpcs_are_recipient_scoped(tmp_path: Path, monkeypatch) -> None:
     responses = iter([_Response([{"id":"notice-1","message":"변경"}]),_Response(3),_Response(1),_Response(2)])
     calls=[]
