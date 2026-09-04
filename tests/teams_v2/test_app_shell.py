@@ -252,10 +252,47 @@ def test_my_space_unifies_company_and_project_work_without_a_duplicate_work_list
     assert not hasattr(page, "company_work")
     assert not hasattr(page, "company_category")
     assert [page.checklist_scope.text(), page.project_scope.text(), page.company_scope.text()] == ["체크리스트 업무", "프로젝트 추가 업무", "사내 업무"]
+    assert page._work_scope is None
+    assert not page.work_submit.isEnabled()
+    assert not any(button.isChecked() for button in (page.checklist_scope, page.project_scope, page.company_scope))
+    assert page.project_field.isHidden() and page.checklist_field.isHidden() and page.work_details.isHidden()
     page.checklist_scope.click()
+    assert page.work_submit.isEnabled()
     assert not page.project_field.isHidden() and not page.checklist_field.isHidden() and page.work_details.isHidden()
     page.company_scope.click()
     assert page.project_field.isHidden() and page.checklist_field.isHidden() and not page.work_details.isHidden()
+    page._clear_work_form()
+    assert page._work_scope is None and not page.work_submit.isEnabled()
+    assert not any(button.isChecked() for button in (page.checklist_scope, page.project_scope, page.company_scope))
+    page.deleteLater(); database.close()
+
+
+def test_employee_work_cards_include_all_three_work_kinds(tmp_path: Path) -> None:
+    QApplication.instance() or QApplication([])
+    database = WorkspaceDatabase(workspace_database_path(tmp_path, "user-a", "org-a"), user_id="user-a", organization_id="org-a")
+    CompanyWorkspace(database)
+    database.conn.execute(
+        "INSERT INTO teams_v2_staff_members(user_id,display_name,role,status,color_hex) VALUES(?,?,?,?,?)",
+        ("user-a", "직원 A", "MEMBER", "ACTIVE", "#A7D4F0"),
+    )
+    database.conn.executemany(
+        "INSERT INTO teams_v3_work_items(remote_id,event_id,work_scope,work_kind,major,minor,name,status,assigned_member_user_id) VALUES(?,?,?,?,?,?,?,?,?)",
+        [
+            ("checklist", "project-a", "PROJECT", "CHECKLIST", "운영", "일반", "체크 업무", "미착수", "user-a"),
+            ("additional", "project-a", "PROJECT", "PROJECT_ADDITIONAL", "추가", "일반", "추가 업무", "진행중", "user-a"),
+            ("company", None, "COMPANY", "COMPANY_SELF", "사내 업무", "일반", "사내 업무", "미착수", "user-a"),
+        ],
+    )
+    database.conn.commit()
+    page = EmployeeWorkPage(database, lambda _task_id: None, current_user_id="user-a")
+    page.refresh()
+
+    active = page._member_work("user-a", completed=False)
+    assert {row["work_kind"] for row in active} == {"CHECKLIST", "PROJECT_ADDITIONAL", "COMPANY_SELF"}
+    labels = [label.text() for label in page.findChildren(QLabel)]
+    assert any("체크리스트 업무" in text for text in labels)
+    assert any("프로젝트 추가 업무" in text for text in labels)
+    assert any("사내 업무" in text for text in labels)
     page.deleteLater(); database.close()
 
 

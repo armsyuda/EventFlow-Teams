@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtCore import QDate, QSize, Qt
-from PySide6.QtWidgets import QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSizePolicy, QStackedWidget, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractItemView, QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSizePolicy, QStackedWidget, QTextEdit, QVBoxLayout, QWidget
 
 from event_checklist.ui.widgets import DirectDateEdit
 
@@ -21,7 +21,7 @@ class MySpacePage(QWidget):
         self._suppress = False
         self._editing_work: dict | None = None
         self._editing_schedule: dict | None = None
-        self._work_scope = "COMPANY"
+        self._work_scope: str | None = None
 
         root = QVBoxLayout(self); root.setContentsMargins(32, 28, 32, 32); root.setSpacing(16)
         root.addWidget(QLabel("나의 공간", objectName="PageTitle"))
@@ -66,8 +66,20 @@ class MySpacePage(QWidget):
         box = QWidget(); layout = QVBoxLayout(box); layout.setContentsMargins(0, 0, 0, 0); layout.setSpacing(4); layout.addWidget(QLabel(label, objectName="Muted")); layout.addWidget(widget); return box
 
     def _build_work_form(self, layout: QVBoxLayout) -> None:
-        scope_row = QHBoxLayout(); scope_row.setSpacing(6); self.checklist_scope = self._scope_button("체크리스트 업무", "CHECKLIST"); self.project_scope = self._scope_button("프로젝트 추가 업무", "PROJECT"); self.company_scope = self._scope_button("사내 업무", "COMPANY")
-        scope_row.addWidget(self.checklist_scope); scope_row.addWidget(self.project_scope); scope_row.addWidget(self.company_scope); layout.addLayout(scope_row)
+        layout.addWidget(QLabel("1. 등록할 업무 종류를 먼저 선택하세요", objectName="SectionTitle"))
+        scope_tabs = QFrame(); scope_tabs.setObjectName("WorkScopeTabs")
+        scope_tabs.setStyleSheet("""
+            QFrame#WorkScopeTabs { background:#E8EDF3; border:1px solid #CBD5E1; border-radius:11px; }
+            QFrame#WorkScopeTabs QPushButton { min-height:38px; padding:0 12px; background:transparent; color:#667085; border:1px solid transparent; border-radius:8px; font-weight:700; }
+            QFrame#WorkScopeTabs QPushButton:hover { background:#F8FAFC; color:#344054; }
+            QFrame#WorkScopeTabs QPushButton:checked { background:#FFFFFF; color:#F4511E; border:2px solid #F4511E; }
+        """)
+        scope_row = QHBoxLayout(scope_tabs); scope_row.setContentsMargins(5, 5, 5, 5); scope_row.setSpacing(5)
+        self.scope_group = QButtonGroup(self); self.scope_group.setExclusive(True)
+        self.checklist_scope = self._scope_button("체크리스트 업무", "CHECKLIST"); self.project_scope = self._scope_button("프로젝트 추가 업무", "PROJECT"); self.company_scope = self._scope_button("사내 업무", "COMPANY")
+        for button in (self.checklist_scope, self.project_scope, self.company_scope):
+            self.scope_group.addButton(button); scope_row.addWidget(button, 1)
+        layout.addWidget(scope_tabs)
         self.project_picker = QComboBox(); self.project_picker.currentIndexChanged.connect(self._refresh_checklist_picker); self.project_field = self._field("프로젝트", self.project_picker); layout.addWidget(self.project_field)
         self.checklist_picker = QComboBox(); self.checklist_field = self._field("체크리스트 항목", self.checklist_picker); layout.addWidget(self.checklist_field)
         self.work_details = QWidget(); detail_layout = QVBoxLayout(self.work_details); detail_layout.setContentsMargins(0, 0, 0, 0); detail_layout.setSpacing(8)
@@ -75,19 +87,24 @@ class MySpacePage(QWidget):
         self.work_title = QLineEdit(); self.work_title.setPlaceholderText("업무명"); detail_layout.addWidget(self._field("업무명", self.work_title))
         self.work_status = QComboBox(); self.work_status.addItems(["미착수", "진행중", "확인요청", "보류", "완료"]); detail_layout.addWidget(self._field("상태", self.work_status))
         self.work_content = QTextEdit(); self.work_content.setPlaceholderText("메모는 선택 사항입니다."); self.work_content.setFixedHeight(58); detail_layout.addWidget(self._field("메모", self.work_content)); layout.addWidget(self.work_details)
-        self.work_message = QLabel("프로젝트와 무관한 업무를 등록하면 전체 달력과 내 업무 우선순위에 표시됩니다.", objectName="InfoGuide"); layout.addWidget(self.work_message)
+        self.work_message = QLabel("업무 종류를 선택해야 입력과 등록을 시작할 수 있습니다.", objectName="InfoGuide"); layout.addWidget(self.work_message)
         actions = QHBoxLayout(); actions.addStretch(); self.work_cancel = QPushButton("입력 비우기"); self.work_cancel.setProperty("quiet", True); self.work_cancel.clicked.connect(self._clear_work_form); self.work_submit = QPushButton("사내 업무 등록"); self.work_submit.setProperty("primary", True); self.work_submit.clicked.connect(self._save_work_form); actions.addWidget(self.work_cancel); actions.addWidget(self.work_submit); layout.addLayout(actions)
-        self._set_work_scope("COMPANY")
+        self._set_work_scope(None)
 
     def _scope_button(self, text: str, scope: str) -> QPushButton:
-        button = QPushButton(text); button.setCheckable(True); button.setProperty("compact", True); button.clicked.connect(lambda: self._set_work_scope(scope)); return button
+        button = QPushButton(text); button.setCheckable(True); button.clicked.connect(lambda: self._set_work_scope(scope)); return button
 
-    def _set_work_scope(self, scope: str) -> None:
+    def _set_work_scope(self, scope: str | None) -> None:
         self._work_scope = scope
+        if scope is None:
+            self.scope_group.setExclusive(False)
         for button, key in ((self.checklist_scope, "CHECKLIST"), (self.project_scope, "PROJECT"), (self.company_scope, "COMPANY")):
-            selected = key == scope; button.setChecked(selected); button.setStyleSheet("QPushButton{background:#EAF1F6;color:#40576B;border:1px solid #AABCCC;font-weight:700;}" if selected else "")
+            button.setChecked(key == scope)
+        self.scope_group.setExclusive(True)
         needs_project = scope in {"CHECKLIST", "PROJECT"}; self.project_field.setVisible(needs_project); self.checklist_field.setVisible(scope == "CHECKLIST"); self.work_details.setVisible(scope != "CHECKLIST")
-        if scope == "CHECKLIST": self.work_message.setText("프로젝트의 공식 체크리스트 항목을 선택해 내 담당 업무로 연결합니다. 새 업무는 만들어지지 않습니다."); self.work_submit.setText("체크리스트 업무 연결")
+        self.work_submit.setEnabled(scope is not None)
+        if scope is None: self.work_details.hide(); self.work_message.setText("업무 종류를 선택해야 입력과 등록을 시작할 수 있습니다."); self.work_submit.setText("업무 종류를 선택하세요")
+        elif scope == "CHECKLIST": self.work_message.setText("프로젝트의 공식 체크리스트 항목을 선택해 내 담당 업무로 연결합니다. 새 업무는 만들어지지 않습니다."); self.work_submit.setText("체크리스트 업무 연결")
         elif scope == "PROJECT": self.work_message.setText("체크리스트에 없는 개인 추가 업무입니다. 선택한 프로젝트에만 연결되며 본인만 수정·삭제할 수 있습니다."); self.work_submit.setText("프로젝트 추가 업무 등록")
         else: self.work_message.setText("프로젝트와 무관한 업무입니다. 등록한 본인에게만 연결되며 전체 달력에 표시됩니다."); self.work_submit.setText("사내 업무 등록")
 
@@ -160,9 +177,12 @@ class MySpacePage(QWidget):
         self.work_title.setText(str(task.get("name") or "")); self.work_status.setCurrentText(str(task.get("status") or "미착수")); self.work_start.setDate(QDate.fromString(str(task.get("planned_start") or QDate.currentDate().toString("yyyy-MM-dd")), "yyyy-MM-dd")); self.work_end.setDate(QDate.fromString(str(task.get("due_date") or QDate.currentDate().toString("yyyy-MM-dd")), "yyyy-MM-dd")); self.work_content.setPlainText(str(task.get("detail") or "")); self.work_cancel.setText("수정 취소"); self.work_submit.setText("수정 저장")
 
     def _clear_work_form(self) -> None:
-        self._editing_work = None; self.work_title.clear(); self.work_status.setCurrentText("미착수"); self.work_start.setDate(QDate.currentDate()); self.work_end.setDate(QDate.currentDate()); self.work_content.clear(); self.work_cancel.setText("입력 비우기"); self._set_work_scope(self._work_scope)
+        self._editing_work = None; self.work_title.clear(); self.work_status.setCurrentText("미착수"); self.work_start.setDate(QDate.currentDate()); self.work_end.setDate(QDate.currentDate()); self.work_content.clear(); self.work_cancel.setText("입력 비우기"); self._set_work_scope(None)
 
     def _save_work_form(self) -> None:
+        if self._work_scope is None:
+            self.work_message.setText("먼저 등록할 업무 종류를 선택하세요.")
+            return
         if self._work_scope == "CHECKLIST":
             selected = self.checklist_picker.currentData()
             if not isinstance(selected, dict) or not selected.get("id"): self.work_message.setText("연결할 체크리스트 항목을 선택하세요."); return
