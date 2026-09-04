@@ -225,3 +225,4 @@
 
 - 업무카드 공통 상세창, 카드 미리보기와 삽입 위치 애니메이션, 직원별 우선순위 및 원자적 이관·양쪽 알림 개선을 사용자 자동 업데이트 대상으로 `0.3.66`에 포함한다.
 - 공개 전 Teams 전체 Pytest 186건, Python compileall, 공백 검사를 통과했다. 로컬 실행 파일 SHA-256은 `654DAE68E235072EE1ED7A5E921826269C636FC554532C34114F730D1C53CABC`, 설치 파일 `EventFlowTeams-Setup-0.3.66.exe`는 `5F654B56A0524B7DC58C5856E6E9B74F7B0EAB7B0CAC6541FAF03F421443EF71`이며 격리 환경 기동 health `ok`를 확인했다.
+- GitHub Windows release 작업 `33834971485`가 성공했다. 버전 설치 파일, 고정 이름 설치 파일, 자동 업데이트 ZIP, SHA-256 목록이 게시됐으며 `releases/latest`가 `v0.3.66`으로 연결된다. 공개 설치 파일 SHA-256은 `14A027098D328526D69C251BF7BEC157F7CE17732BA27B507D6E2995E225D966`, 자동 업데이트 ZIP은 `569CC31ABE8F8133F23868373296BADEB96078BBD8BE4B65CC3E2DDE03F35932`다.
