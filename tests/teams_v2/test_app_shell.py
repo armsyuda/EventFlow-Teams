@@ -254,6 +254,8 @@ def test_my_space_unifies_company_and_project_work_without_a_duplicate_work_list
     assert [page.checklist_scope.text(), page.project_scope.text(), page.company_scope.text()] == ["체크리스트 업무", "프로젝트 추가 업무", "사내 업무"]
     assert "background:#FFFFFF" in page.scope_tabs.styleSheet()
     assert "border:1px solid #AAB8C8" in page.scope_tabs.styleSheet()
+    assert "QFrame#WorkScopeTabs { background:transparent; border:none; }" in page.scope_tabs.styleSheet()
+    assert page.scope_tabs.layout().contentsMargins().left() == 0
     assert "QPushButton:checked" in page.scope_tabs.styleSheet()
     assert page._work_scope is None
     assert not page.work_submit.isEnabled()

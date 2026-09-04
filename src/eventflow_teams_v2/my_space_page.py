@@ -69,7 +69,7 @@ class MySpacePage(QWidget):
         layout.addWidget(QLabel("1. 등록할 업무 종류를 먼저 선택하세요", objectName="SectionTitle"))
         self.scope_tabs = QFrame(); self.scope_tabs.setObjectName("WorkScopeTabs")
         self.scope_tabs.setStyleSheet("""
-            QFrame#WorkScopeTabs { background:#F1F5F9; border:1px solid #CBD5E1; border-radius:12px; }
+            QFrame#WorkScopeTabs { background:transparent; border:none; }
             QFrame#WorkScopeTabs QPushButton {
                 min-height:44px; padding:0 12px; background:#FFFFFF; color:#344054;
                 border:1px solid #AAB8C8; border-radius:9px; font-weight:700;
@@ -78,7 +78,7 @@ class MySpacePage(QWidget):
             QFrame#WorkScopeTabs QPushButton:pressed { background:#FFE7D6; }
             QFrame#WorkScopeTabs QPushButton:checked { background:#F4511E; color:#FFFFFF; border:2px solid #D83A0E; }
         """)
-        scope_row = QHBoxLayout(self.scope_tabs); scope_row.setContentsMargins(7, 7, 7, 7); scope_row.setSpacing(8)
+        scope_row = QHBoxLayout(self.scope_tabs); scope_row.setContentsMargins(0, 0, 0, 0); scope_row.setSpacing(10)
         self.scope_group = QButtonGroup(self); self.scope_group.setExclusive(True)
         self.checklist_scope = self._scope_button("체크리스트 업무", "CHECKLIST"); self.project_scope = self._scope_button("프로젝트 추가 업무", "PROJECT"); self.company_scope = self._scope_button("사내 업무", "COMPANY")
         for button in (self.checklist_scope, self.project_scope, self.company_scope):
