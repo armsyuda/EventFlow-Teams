@@ -37,6 +37,13 @@ class TitleBar(QFrame):
         self.update_meta = QLabel(f"현재 {__version__}")
         self.update_meta.setObjectName("UpdateMeta")
         self.update_meta.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.notification_button = QPushButton("🔔")
+        self.notification_button.setObjectName("NotificationButton")
+        self.notification_button.setFixedHeight(30)
+        self.notification_button.setToolTip("받은 알림 보기")
+        self.notification_button.setAccessibleName("받은 알림 보기")
+        self.notification_button.hide()
+        layout.addWidget(self.notification_button)
         layout.addWidget(self.update_meta)
         layout.addWidget(self.update_button)
         self.minimum = self._button("—", "창 최소화", self.window.showMinimized)
@@ -49,6 +56,10 @@ class TitleBar(QFrame):
         button.setToolTip(tooltip); button.setFixedSize(46, 44); button.clicked.connect(callback); return button
 
     def set_event_name(self, name): self.event_name.setText(name or "프로젝트를 선택하세요")
+
+    def set_notification_count(self, count: int) -> None:
+        self.notification_button.setText(f"🔔 {count}" if count else "🔔")
+        self.notification_button.setToolTip(f"받은 알림 보기 · 미확인 {count}개" if count else "받은 알림 보기")
 
     def set_sidebar_visible(self, visible: bool) -> None:
         action = "숨기기" if visible else "보기"

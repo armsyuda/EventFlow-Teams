@@ -357,6 +357,19 @@ class TeamsV2Api:
         payload = self.rpc("teams_v2_pop_task_transfer_notifications", {"target_organization_id": organization_id}, "업무 이관 알림을 받을 수 없습니다.")
         return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
 
+    def notifications(self, organization_id: str, unread_only: bool = False) -> list[dict[str, Any]]:
+        payload = self.rpc("teams_list_notifications", {"target_organization_id": organization_id, "unread_only": unread_only, "page_limit": 500}, "알림을 불러올 수 없습니다.")
+        return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+
+    def unread_notification_count(self, organization_id: str) -> int:
+        return int(self.rpc("teams_unread_notification_count", {"target_organization_id": organization_id}, "미확인 알림 수를 불러올 수 없습니다.") or 0)
+
+    def mark_notification_read(self, organization_id: str, notification_id: str | None = None) -> int:
+        return int(self.rpc("teams_mark_notification_read", {"target_organization_id": organization_id, "target_notification_id": notification_id}, "알림 확인 상태를 저장할 수 없습니다.") or 0)
+
+    def delete_notification(self, organization_id: str, notification_id: str | None = None) -> int:
+        return int(self.rpc("teams_delete_notification", {"target_organization_id": organization_id, "target_notification_id": notification_id}, "알림을 삭제할 수 없습니다.") or 0)
+
     def rpc(self, name: str, payload: dict[str, Any], error_message: str) -> Any:
         response = requests.post(
             f"{self.config.supabase_url}/rest/v1/rpc/{name}",

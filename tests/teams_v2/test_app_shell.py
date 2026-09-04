@@ -11,6 +11,7 @@ from eventflow_teams_v2.api import Organization
 from eventflow_teams_v2.app import _update_health_file
 from eventflow_teams_v2.app import CompanyManagementPage, CompanyMembersPage, OrganizationPage, TeamsV2Window
 from eventflow_teams_v2.company_pages import CompanyCalendarPage
+from eventflow_teams_v2.notification_page import NotificationPage
 from eventflow_teams_v2.company_workspace import CompanyWorkspace
 from eventflow_teams_v2.my_space_page import MySpacePage
 from eventflow_teams_v2.staff_pages import EmployeeWorkPage
@@ -263,6 +264,24 @@ def test_company_calendar_hides_personal_schedules_for_a_selected_project(tmp_pa
     assert [schedule["title"] for schedule in page.timeline.personal_schedules] == ["개인 휴가"]
     assert page.personal.isEnabled()
     page.deleteLater(); database.close()
+
+
+def test_company_calendar_task_card_shows_assignee_name(tmp_path: Path) -> None:
+    QApplication.instance() or QApplication([])
+    database=WorkspaceDatabase(workspace_database_path(tmp_path,"user-a","org-a"),user_id="user-a",organization_id="org-a"); CompanyWorkspace(database)
+    page=CompanyCalendarPage(database)
+    card=page._task_card({"name":"현장 준비","major":"운영","status":"미착수","work_scope":"PROJECT","event_id":None,"member_name":"김담당"})
+    assert any("담당자 · 김담당" in label.text() for label in card.findChildren(QLabel))
+    page.deleteLater(); database.close()
+
+
+def test_notification_page_keeps_history_and_supports_unread_filter() -> None:
+    QApplication.instance() or QApplication([]); calls=[]
+    notices=[{"id":"n1","title":"업무 변경","message":"마감일을 변경했습니다.","project_name":"행사 A","created_at":"2026-09-04T10:00:00+09:00","read_at":None}]
+    page=NotificationPage(lambda unread:(calls.append(unread) or notices),lambda _id:True,lambda _id:True,lambda _notice:None)
+    page.refresh(); assert page.list.count()==1 and "업무 변경" in page.list.itemWidget(page.list.item(0)).findChildren(QLabel)[0].text()
+    page.unread.setChecked(True); assert calls[-1] is True
+    page.deleteLater()
 
 
 def test_my_space_unifies_company_and_project_work_without_a_duplicate_work_list(tmp_path: Path) -> None:

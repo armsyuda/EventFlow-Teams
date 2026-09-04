@@ -94,6 +94,24 @@ def test_v2_transfer_and_notifications_use_dedicated_rpcs(tmp_path: Path, monkey
     assert [url.rsplit("/", 1)[-1] for url, _ in calls] == ["teams_v2_transfer_task_member", "teams_v2_pop_task_transfer_notifications"]
 
 
+def test_unified_notification_rpcs_are_recipient_scoped(tmp_path: Path, monkeypatch) -> None:
+    responses = iter([_Response([{"id":"notice-1","message":"변경"}]),_Response(3),_Response(1),_Response(2)])
+    calls=[]
+    def post(url,**kwargs): calls.append((url.rsplit("/",1)[-1],kwargs["json"])); return next(responses)
+    monkeypatch.setattr("eventflow_teams_v2.api.requests.post",post)
+    api=TeamsV2Api(TeamsV2Config("https://example.supabase.co","publishable",tmp_path),Session("token","refresh","member"))
+    assert api.notifications("org",True)[0]["id"]=="notice-1"
+    assert api.unread_notification_count("org")==3
+    assert api.mark_notification_read("org","notice-1")==1
+    assert api.delete_notification("org",None)==2
+    assert calls==[
+        ("teams_list_notifications",{"target_organization_id":"org","unread_only":True,"page_limit":500}),
+        ("teams_unread_notification_count",{"target_organization_id":"org"}),
+        ("teams_mark_notification_read",{"target_organization_id":"org","target_notification_id":"notice-1"}),
+        ("teams_delete_notification",{"target_organization_id":"org","target_notification_id":None}),
+    ]
+
+
 def test_v2_company_join_code_uses_administrator_rpc(tmp_path: Path, monkeypatch) -> None:
     calls = []
 

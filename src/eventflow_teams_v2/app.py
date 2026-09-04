@@ -31,6 +31,7 @@ from .staff_pages import EmployeeWorkPage
 from .my_space_page import MySpacePage
 from .company_workspace import CompanyWorkspace
 from .company_pages import CompanyCalendarPage, FinancePage
+from .notification_page import NotificationPage
 from .diagnostics import RuntimeWindowTrace
 
 
@@ -557,7 +558,7 @@ class TeamsV2Window(QMainWindow):
         self.local_window: MainWindow | None = None; self.current_organization: Organization | None = None; self.permission_worker: Worker | None = None; self.snapshot_worker: Worker | None = None; self.changes_worker: Worker | None = None; self.access_refresh_worker: Worker | None = None; self.sync_engine: WorkspaceSyncEngine | None = None; self.realtime: RealtimeSignalClient | None = None; self._sync_workers: list[Worker] = []; self._opened_cursor = ""; self._opened_with_pending = False
         self.update_info: UpdateInfo | None = None; self.update_progress: StartupSplash | None = None; self.update_check_worker: Worker | None = None; self.update_download_worker: Worker | None = None
         self.company_management_page: CompanyManagementPage | None = None; self.company_members_page: CompanyMembersPage | None = None; self.guest_management_page: GuestManagementPage | None = None
-        self.company_workspace: CompanyWorkspace | None = None; self.company_calendar_page: CompanyCalendarPage | None = None; self.company_finance_page: FinancePage | None = None; self.company_v3_buttons: list[QPushButton] = []; self.v3_worker: Worker | None = None; self.v3_mutation_inflight = False; self._v3_initial_open = False
+        self.company_workspace: CompanyWorkspace | None = None; self.company_calendar_page: CompanyCalendarPage | None = None; self.company_finance_page: FinancePage | None = None; self.notification_page: NotificationPage | None = None; self.notification_button: QPushButton | None = None; self.company_v3_buttons: list[QPushButton] = []; self.v3_worker: Worker | None = None; self.notification_worker: Worker | None = None; self.v3_mutation_inflight = False; self._v3_initial_open = False; self._realtime_refresh_pending = False; self._v3_refresh_pending = False; self._notification_refresh_pending = False; self._known_notification_ids: set[str] = set(); self._notification_baseline_loaded = False
         self.v3_outbox_timer = QTimer(self); self.v3_outbox_timer.setInterval(1200); self.v3_outbox_timer.timeout.connect(self._flush_v3_outbox); self.v3_outbox_timer.start()
         self.setWindowTitle("이벤트 플로우 Teams V2"); self.setWindowIcon(app_icon()); self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint); self.resize(1440, 900); self.setMinimumSize(1120, 700)
         outer = QWidget(); outer.setObjectName("AppRoot"); outer_layout = QVBoxLayout(outer); outer_layout.setContentsMargins(1, 1, 1, 1); outer_layout.setSpacing(0)
@@ -611,6 +612,7 @@ class TeamsV2Window(QMainWindow):
         self._configure_local_shell(self.local_window, organization)
         self._install_company_workspace_features(self.local_window, organization)
         self._install_staff_features(self.local_window, organization)
+        self._install_notification_features(self.local_window, organization)
         self.local_window.setEnabled(False)
         self.stack.addWidget(self.local_window); self.stack.setCurrentWidget(self.local_window); self.shell_title_bar.hide()
         self._trace("workspace_page_shown")
@@ -656,6 +658,67 @@ class TeamsV2Window(QMainWindow):
         self.company_v3_buttons = [calendar_button]
         if organization.role == "GUEST":
             for button in self.company_v3_buttons: button.hide()
+
+    def _install_notification_features(self, local: MainWindow, organization: Organization) -> None:
+        if organization.role == "GUEST": return
+        self.notification_page = NotificationPage(self._load_notifications, self._mark_notification_read, self._delete_notification, self._open_notification, local)
+        local.stack.addWidget(self.notification_page)
+        self.notification_button = local.title_bar.notification_button
+        self.notification_button.show(); self.notification_button.clicked.connect(self._show_notifications)
+
+    def _show_notifications(self) -> None:
+        if not self.local_window or not self.notification_page: return
+        for nav in self.local_window.nav_buttons: nav.setChecked(False)
+        self.local_window.stack.setCurrentWidget(self.notification_page); self.notification_page.refresh()
+
+    def _load_notifications(self, unread_only: bool=False) -> list[dict]:
+        if not self.current_organization: return []
+        return self.api.notifications(self.current_organization.id, unread_only)
+
+    def _mark_notification_read(self, notification_id: str | None) -> bool:
+        if not self.current_organization: return False
+        try: self.api.mark_notification_read(self.current_organization.id, notification_id); self._refresh_notifications_async(show_new=False); return True
+        except ApiError as exc: self._show_toast(str(exc)); return False
+
+    def _delete_notification(self, notification_id: str | None) -> bool:
+        if not self.current_organization: return False
+        try: self.api.delete_notification(self.current_organization.id, notification_id); self._refresh_notifications_async(show_new=False); return True
+        except ApiError as exc: self._show_toast(str(exc)); return False
+
+    def _open_notification(self, notice: dict) -> None:
+        if not self.local_window: return
+        task_id=str(notice.get("task_id") or "")
+        mapping=self.workspace_db.one("SELECT local_id FROM teams_v2_entity_map WHERE entity_type='EVENT_TASK' AND remote_id=?",(task_id,)) if self.workspace_db and task_id else None
+        if mapping: self.local_window.open_teams_task(int(mapping["local_id"])); return
+        if hasattr(self,"my_space_page"):
+            button=next((b for b in self.local_window.findChildren(QPushButton) if b.text()=="나의 공간"),None)
+            if button: self._show_v3_page(self.my_space_page,button)
+
+    def _refresh_notifications_async(self, show_new: bool=True) -> None:
+        if self.notification_worker and self.notification_worker.isRunning(): self._notification_refresh_pending=True; return
+        if not self.current_organization or not self.notification_button: return
+        self._notification_refresh_pending=False
+        oid=self.current_organization.id
+        self.notification_worker=Worker(lambda:(self.api.notifications(oid,False),self.api.unread_notification_count(oid)))
+        self.notification_worker.finished.connect(lambda value,organization_id=oid,notify=show_new:self._notifications_loaded(organization_id,value,notify))
+        self.notification_worker.failed.connect(lambda _message:self._notification_refresh_finished())
+        self.notification_worker.start()
+
+    def _notification_refresh_finished(self) -> None:
+        if self._notification_refresh_pending:
+            self._notification_refresh_pending=False; QTimer.singleShot(0,self._refresh_notifications_async)
+
+    def _notifications_loaded(self, organization_id: str, value: object, show_new: bool) -> None:
+        if not self.current_organization or self.current_organization.id!=organization_id or not isinstance(value,tuple): return
+        notices,count=value; notices=notices if isinstance(notices,list) else []
+        ids={str(n.get("id")) for n in notices if isinstance(n,dict) and n.get("id")}
+        if show_new and self._notification_baseline_loaded:
+            for notice in reversed([n for n in notices if isinstance(n,dict) and str(n.get("id") or "") not in self._known_notification_ids]):
+                self._show_toast(str(notice.get("message") or notice.get("title") or "새 알림"))
+        self._known_notification_ids=ids; self._notification_baseline_loaded=True
+        if self.notification_button: self.local_window.title_bar.set_notification_count(int(count or 0))
+        if self.notification_page and self.local_window and self.local_window.stack.currentWidget() is self.notification_page: self.notification_page.set_notices(notices)
+        self._notification_refresh_finished()
 
     def _show_v3_page(self, page: QWidget | None, button: QPushButton) -> None:
         if not self.local_window or not page:
@@ -717,7 +780,8 @@ class TeamsV2Window(QMainWindow):
             self._show_v3_page(self.company_finance_page, button)
 
     def _load_v3_workspace(self) -> None:
-        if not self.current_organization or not self.company_workspace or (self.v3_worker and self.v3_worker.isRunning()):
+        if self.v3_worker and self.v3_worker.isRunning(): self._v3_refresh_pending=True; return
+        if not self.current_organization or not self.company_workspace:
             return
         organization_id = self.current_organization.id
         cursor = self.company_workspace.cursor()
@@ -742,6 +806,9 @@ class TeamsV2Window(QMainWindow):
                     self._show_v3_page(self.company_calendar_page, button)
         except Exception as exc:
             self._show_toast(f"회사 전체 업무 반영 실패: {exc}")
+        finally:
+            if self._v3_refresh_pending:
+                self._v3_refresh_pending=False; QTimer.singleShot(0,self._load_v3_workspace)
 
     def _queue_v3(self, operation: str, payload: dict) -> None:
         if not self.company_workspace or not self.current_organization:
@@ -1093,6 +1160,7 @@ class TeamsV2Window(QMainWindow):
             self._start_sync_engine()
             self._start_realtime()
             self._load_v3_workspace()
+            self._refresh_notifications_async(show_new=False)
             self.staff_directory_worker = Worker(lambda: self.api.staff_directory(organization_id))
             self.staff_directory_worker.finished.connect(lambda members, oid=organization_id: self._staff_directory_loaded(oid, members))
             self.staff_directory_worker.start()
@@ -1165,10 +1233,6 @@ class TeamsV2Window(QMainWindow):
             snapshot["staff_members"] = []
             snapshot["personal_schedules"] = []
         snapshot["my_task_priorities"] = []
-        try:
-            snapshot["transfer_notifications"] = self.api.pop_task_transfer_notifications(organization_id)
-        except Exception:
-            snapshot["transfer_notifications"] = []
         return snapshot
 
     def _snapshot_loaded(self, organization_id: str, permissions: set[str], snapshot: object) -> None:
@@ -1187,9 +1251,6 @@ class TeamsV2Window(QMainWindow):
                 self.workspace_db.conn.commit()
             self.local_window.refresh_all()
             self._trace("workspace_snapshot_rendered")
-            for notice in snapshot.get("transfer_notifications", []):
-                if isinstance(notice, dict) and notice.get("message"):
-                    self._show_toast(str(notice["message"]))
         except Exception as exc:
             self._snapshot_failed(organization_id, str(exc))
             return
@@ -1200,6 +1261,7 @@ class TeamsV2Window(QMainWindow):
         self._start_sync_engine()
         self._start_realtime()
         self._load_v3_workspace()
+        self._refresh_notifications_async(show_new=False)
 
     def _changes_loaded(self, organization_id: str, changes: object) -> None:
         if not self.current_organization or self.current_organization.id != organization_id or not self.local_window or not self.workspace_db:
@@ -1326,7 +1388,8 @@ class TeamsV2Window(QMainWindow):
             self.local_window.deleteLater()
             self.local_window = None
         self.company_management_page = None; self.company_members_page = None; self.guest_management_page = None
-        self.company_workspace = None; self.company_calendar_page = None; self.company_finance_page = None; self.v3_worker = None; self.v3_mutation_inflight = False; self._v3_initial_open = False
+        if self.notification_worker and self.notification_worker.isRunning(): self.notification_worker.wait(250)
+        self.company_workspace = None; self.company_calendar_page = None; self.company_finance_page = None; self.notification_page = None; self.notification_button = None; self.v3_worker = None; self.notification_worker = None; self.v3_mutation_inflight = False; self._v3_initial_open = False; self._known_notification_ids.clear(); self._notification_baseline_loaded = False; self._realtime_refresh_pending = False; self._v3_refresh_pending = False; self._notification_refresh_pending = False
         if self.workspace_db:
             self.workspace_db.close(); self.workspace_db = None
         self.current_organization = None
@@ -1433,12 +1496,7 @@ class TeamsV2Window(QMainWindow):
         previous_id = self.current_organization.id
 
         def load_access() -> tuple[list[Organization], list[dict]]:
-            notices: list[dict] = []
-            try:
-                notices = self.api.pop_member_access_notifications(previous_id)
-            except ApiError:
-                pass
-            return self.api.organizations(), notices
+            return self.api.organizations(), []
 
         self.access_refresh_worker = Worker(load_access)
         self.access_refresh_worker.finished.connect(lambda value, oid=previous_id: self._access_refresh_loaded(oid, value))
@@ -1461,10 +1519,13 @@ class TeamsV2Window(QMainWindow):
 
     def _request_realtime_changes(self) -> None:
         """Fetch authorized deltas after a signal; never refresh a whole screen."""
-        if (not self.current_organization or not self.workspace_db or not self.local_window
-                or self.workspace_db.pending_outbox() or (self.changes_worker and self.changes_worker.isRunning())):
+        if not self.current_organization or not self.workspace_db or not self.local_window: return
+        if self.workspace_db.pending_outbox() or (self.changes_worker and self.changes_worker.isRunning()):
+            self._realtime_refresh_pending=True
             return
+        self._realtime_refresh_pending=False
         self._load_v3_workspace()
+        self._refresh_notifications_async(show_new=True)
         row = self.workspace_db.one("SELECT remote_cursor FROM teams_v2_workspace WHERE singleton=1")
         cursor = int(row["remote_cursor"] or 0) if row else 0
         def load_changes():
@@ -1473,10 +1534,6 @@ class TeamsV2Window(QMainWindow):
                 changes["my_task_priorities"] = self.api.my_task_priorities(self.current_organization.id)
             except Exception:
                 changes["my_task_priorities"] = []
-            try:
-                changes["transfer_notifications"] = self.api.pop_task_transfer_notifications(self.current_organization.id)
-            except Exception:
-                changes["transfer_notifications"] = []
             return changes
         self.changes_worker = Worker(load_changes)
         self.changes_worker.finished.connect(lambda changes, oid=self.current_organization.id: self._realtime_changes_loaded(oid, changes))
@@ -1501,11 +1558,11 @@ class TeamsV2Window(QMainWindow):
                 if affected:
                     QTimer.singleShot(80, lambda ids=affected: self._flash_task_rows(ids))
                     self._show_toast(f"현재 프로젝트 변경 {len(affected)}건을 반영했습니다.")
-            for notice in changes.get("transfer_notifications", []):
-                if isinstance(notice, dict) and notice.get("message"):
-                    self._show_toast(str(notice["message"]))
         except Exception as exc:
             self._changes_failed(organization_id, str(exc))
+        finally:
+            if self._realtime_refresh_pending:
+                self._realtime_refresh_pending=False; QTimer.singleShot(0,self._request_realtime_changes)
 
     def _current_event_task_ids(self, changes: dict) -> set[int]:
         if not self.workspace_db or not self.local_window or not self.local_window.selected_event_id:

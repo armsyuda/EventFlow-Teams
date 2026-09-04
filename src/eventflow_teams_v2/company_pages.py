@@ -269,8 +269,11 @@ class CompanyCalendarPage(QWidget):
         if member: clauses.append("assigned_member_user_id=?"); args.append(member)
         tasks = [dict(row) for row in self.db.query("SELECT * FROM teams_v3_work_items WHERE " + " AND ".join(clauses), tuple(args))]
         try:
-            colors = {str(row["user_id"]): row["color_hex"] for row in self.db.query("SELECT user_id,color_hex FROM teams_v2_staff_members")}
-            for task in tasks: task["member_color_hex"] = colors.get(str(task.get("assigned_member_user_id") or ""))
+            members = {str(row["user_id"]): dict(row) for row in self.db.query("SELECT user_id,display_name,color_hex,status FROM teams_v2_staff_members")}
+            for task in tasks:
+                member = members.get(str(task.get("assigned_member_user_id") or ""))
+                task["member_color_hex"] = member.get("color_hex") if member else None
+                task["member_name"] = (str(member.get("display_name") or "이전 직원") if member else ("이전 직원" if task.get("assigned_member_user_id") else "담당자 미지정"))
         except Exception: pass
         self.timeline.set_tasks(tasks)
         schedules: list[dict] = []
@@ -303,7 +306,7 @@ class CompanyCalendarPage(QWidget):
         border = "#AABCCC" if is_company_work else str(task.get("member_color_hex") or CATEGORY_CARD_BORDERS.get(str(task.get("major") or ""), "#D9DCE1"))
         card = QFrame(); card.setObjectName("CalendarTaskCard"); card.setStyleSheet(f"QFrame#CalendarTaskCard{{background:#FFFFFF;border:1px solid {border};border-radius:10px;}}")
         scope = "사내 업무" if is_company_work else _project_name(self.db, task.get("event_id"))
-        layout = QVBoxLayout(card); layout.setContentsMargins(10, 7, 10, 7); layout.setSpacing(3); top = QHBoxLayout(); top.addWidget(QLabel(f"{scope} · {task.get('major') or '미분류'}", objectName="Muted"), 1); status = QLabel(str(task.get("status") or "미착수")); foreground, background = status_color(str(task.get("status") or "미착수")); status.setStyleSheet(f"color:{foreground};background:{background};border-radius:8px;padding:1px 7px;"); top.addWidget(status); layout.addLayout(top); layout.addWidget(QLabel(str(task.get("name") or "업무"), objectName="CalendarTaskName")); return card
+        layout = QVBoxLayout(card); layout.setContentsMargins(10, 7, 10, 7); layout.setSpacing(3); top = QHBoxLayout(); top.addWidget(QLabel(f"{scope} · {task.get('major') or '미분류'} · 담당자 · {task.get('member_name') or '담당자 미지정'}", objectName="Muted"), 1); status = QLabel(str(task.get("status") or "미착수")); foreground, background = status_color(str(task.get("status") or "미착수")); status.setStyleSheet(f"color:{foreground};background:{background};border-radius:8px;padding:1px 7px;"); top.addWidget(status); layout.addLayout(top); layout.addWidget(QLabel(str(task.get("name") or "업무"), objectName="CalendarTaskName")); return card
 
     def _schedule_card(self, schedule: dict) -> QFrame:
         card = QFrame(); card.setObjectName("CalendarTaskCard"); color = str(schedule.get("color_hex") or "#A7D4F0"); card.setStyleSheet(f"QFrame#CalendarTaskCard{{background:#FFFFFF;border:1px solid {color};border-radius:10px;}}")
