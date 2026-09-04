@@ -67,19 +67,23 @@ class MySpacePage(QWidget):
 
     def _build_work_form(self, layout: QVBoxLayout) -> None:
         layout.addWidget(QLabel("1. 등록할 업무 종류를 먼저 선택하세요", objectName="SectionTitle"))
-        scope_tabs = QFrame(); scope_tabs.setObjectName("WorkScopeTabs")
-        scope_tabs.setStyleSheet("""
-            QFrame#WorkScopeTabs { background:#E8EDF3; border:1px solid #CBD5E1; border-radius:11px; }
-            QFrame#WorkScopeTabs QPushButton { min-height:38px; padding:0 12px; background:transparent; color:#667085; border:1px solid transparent; border-radius:8px; font-weight:700; }
-            QFrame#WorkScopeTabs QPushButton:hover { background:#F8FAFC; color:#344054; }
-            QFrame#WorkScopeTabs QPushButton:checked { background:#FFFFFF; color:#F4511E; border:2px solid #F4511E; }
+        self.scope_tabs = QFrame(); self.scope_tabs.setObjectName("WorkScopeTabs")
+        self.scope_tabs.setStyleSheet("""
+            QFrame#WorkScopeTabs { background:#F1F5F9; border:1px solid #CBD5E1; border-radius:12px; }
+            QFrame#WorkScopeTabs QPushButton {
+                min-height:44px; padding:0 12px; background:#FFFFFF; color:#344054;
+                border:1px solid #AAB8C8; border-radius:9px; font-weight:700;
+            }
+            QFrame#WorkScopeTabs QPushButton:hover { background:#FFF4ED; color:#D83A0E; border:1px solid #F4511E; }
+            QFrame#WorkScopeTabs QPushButton:pressed { background:#FFE7D6; }
+            QFrame#WorkScopeTabs QPushButton:checked { background:#F4511E; color:#FFFFFF; border:2px solid #D83A0E; }
         """)
-        scope_row = QHBoxLayout(scope_tabs); scope_row.setContentsMargins(5, 5, 5, 5); scope_row.setSpacing(5)
+        scope_row = QHBoxLayout(self.scope_tabs); scope_row.setContentsMargins(7, 7, 7, 7); scope_row.setSpacing(8)
         self.scope_group = QButtonGroup(self); self.scope_group.setExclusive(True)
         self.checklist_scope = self._scope_button("체크리스트 업무", "CHECKLIST"); self.project_scope = self._scope_button("프로젝트 추가 업무", "PROJECT"); self.company_scope = self._scope_button("사내 업무", "COMPANY")
         for button in (self.checklist_scope, self.project_scope, self.company_scope):
             self.scope_group.addButton(button); scope_row.addWidget(button, 1)
-        layout.addWidget(scope_tabs)
+        layout.addWidget(self.scope_tabs)
         self.project_picker = QComboBox(); self.project_picker.currentIndexChanged.connect(self._refresh_checklist_picker); self.project_field = self._field("프로젝트", self.project_picker); layout.addWidget(self.project_field)
         self.checklist_picker = QComboBox(); self.checklist_field = self._field("체크리스트 항목", self.checklist_picker); layout.addWidget(self.checklist_field)
         self.work_details = QWidget(); detail_layout = QVBoxLayout(self.work_details); detail_layout.setContentsMargins(0, 0, 0, 0); detail_layout.setSpacing(8)

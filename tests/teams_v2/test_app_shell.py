@@ -252,6 +252,9 @@ def test_my_space_unifies_company_and_project_work_without_a_duplicate_work_list
     assert not hasattr(page, "company_work")
     assert not hasattr(page, "company_category")
     assert [page.checklist_scope.text(), page.project_scope.text(), page.company_scope.text()] == ["체크리스트 업무", "프로젝트 추가 업무", "사내 업무"]
+    assert "background:#FFFFFF" in page.scope_tabs.styleSheet()
+    assert "border:1px solid #AAB8C8" in page.scope_tabs.styleSheet()
+    assert "QPushButton:checked" in page.scope_tabs.styleSheet()
     assert page._work_scope is None
     assert not page.work_submit.isEnabled()
     assert not any(button.isChecked() for button in (page.checklist_scope, page.project_scope, page.company_scope))
